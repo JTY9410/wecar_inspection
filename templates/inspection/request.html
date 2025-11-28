@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+
+{% block title %}검수신청 - 위카아라이 검수시스템{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="page-header">
+        <a href="{{ url_for('inspection_dashboard') }}" class="btn btn-outline-secondary mb-3">
+            <i class="bi bi-arrow-left"></i> 검수대시보드 페이지로
+        </a>
+        <h2><i class="bi bi-file-earmark-plus"></i> 검수신청</h2>
+    </div>
+    
+    <div class="table-container">
+        <h4 class="mb-3">검수신청</h4>
+        <div class="text-center mb-3">
+            <button type="button" class="btn btn-info" onclick="previewRequest()">
+                <i class="bi bi-eye"></i> 확인
+            </button>
+            <button type="button" class="btn btn-primary" onclick="submitRequest()">
+                <i class="bi bi-send"></i> 신청
+            </button>
+        </div>
+        <form id="inspectionForm">
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <label class="form-label">차량번호</label>
+                    <input type="text" class="form-control" name="vehicle_number" id="vehicle_number" required>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">출품번호</label>
+                    <input type="text" class="form-control" name="lot_number" id="lot_number">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">주차번호</label>
+                    <input type="text" class="form-control" name="parking_number" id="parking_number">
+                </div>
+            </div>
+            
+            <div class="mb-3">
+                <label class="form-label">검수신청내역</label>
+                <div class="table-responsive">
+                    <table class="table table-bordered" id="detailsTable">
+                        <thead>
+                            <tr>
+                                <th width="80">순</th>
+                                <th>검수신청내역</th>
+                                <th width="200">작업</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for i in range(1, 6) %}
+                            <tr data-row-index="{{ i }}">
+                                <td>{{ i }}</td>
+                                <td>
+                                    <textarea class="form-control detail-content" name="detail_{{ i }}" rows="3" disabled></textarea>
+                                </td>
+                                <td>
+                                    <div class="action-buttons">
+                                        <button type="button" class="btn btn-sm btn-warning edit-btn" onclick="editRow(this)">
+                                            <i class="bi bi-pencil"></i> 수정
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-success save-btn" onclick="saveRow(this)" style="display:none;">
+                                            <i class="bi bi-check"></i> 저장
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-danger" onclick="deleteRow(this)">
+                                            <i class="bi bi-trash"></i> 삭제
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 확인 모달 -->
+<div class="modal fade" id="previewModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">
+                    <i class="bi bi-eye"></i> 검수신청 확인
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="previewContent">
+                <!-- 미리보기 내용 -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-primary" onclick="confirmSubmit()">
+                    <i class="bi bi-send"></i> 신청
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let formData = {};
+
+function editRow(btn) {
+    const row = $(btn).closest('tr');
+    row.find('.detail-content').prop('disabled', false);
+    row.find('.edit-btn').hide();
+    row.find('.save-btn').show();
+    row.addClass('editing');
+    row.find('.detail-content').focus();
+}
+
+function saveRow(btn) {
+    const row = $(btn).closest('tr');
+    const content = row.find('.detail-content').val();
+    
+    // 클라이언트 측 저장 (실제로는 서버에 저장할 필요 없음, 최종 신청 시 저장)
+    row.find('.detail-content').prop('disabled', true);
+    row.find('.edit-btn').show();
+    row.find('.save-btn').hide();
+    row.removeClass('editing');
+    
+    // 저장 완료 메시지
+    if (content.trim()) {
+        alert('저장되었습니다.');
+    }
+}
+
+function deleteRow(btn) {
+    if (confirm('이 행의 내용을 삭제하시겠습니까?')) {
+        const row = $(btn).closest('tr');
+        row.find('.detail-content').val('');
+        row.find('.detail-content').prop('disabled', true);
+        row.find('.edit-btn').show();
+        row.find('.save-btn').hide();
+        row.removeClass('editing');
+    }
+}
+
+function previewRequest() {
+    const vehicleNumber = $('#vehicle_number').val();
+    const lotNumber = $('#lot_number').val();
+    const parkingNumber = $('#parking_number').val();
+    
+    if (!vehicleNumber) {
+        alert('차량번호를 입력해주세요.');
+        return;
+    }
+    
+    const details = [];
+    $('#detailsTable tbody tr').each(function() {
+        const content = $(this).find('.detail-content').val().trim();
+        if (content) {
+            const sequence = $(this).data('row-index');
+            details.push({
+                sequence: sequence,
+                content: content
+            });
+        }
+    });
+    
+    if (details.length === 0) {
+        alert('검수신청내역을 최소 1개 이상 입력해주세요.');
+        return;
+    }
+    
+    formData = {
+        vehicle_number: vehicleNumber,
+        lot_number: lotNumber,
+        parking_number: parkingNumber,
+        details: details
+    };
+    
+    let html = '<div class="table-responsive">';
+    html += '<table class="table table-bordered mb-3">';
+    html += '<tr><th width="150">차량번호</th><td>' + (vehicleNumber || '-') + '</td></tr>';
+    html += '<tr><th>출품번호</th><td>' + (lotNumber || '-') + '</td></tr>';
+    html += '<tr><th>주차번호</th><td>' + (parkingNumber || '-') + '</td></tr>';
+    html += '</table>';
+    html += '<h5 class="mb-3">검수신청내역</h5>';
+    html += '<table class="table table-bordered">';
+    html += '<thead><tr><th width="80">순</th><th>검수신청내역</th></tr></thead><tbody>';
+    details.forEach(function(detail) {
+        html += '<tr><td>' + detail.sequence + '</td><td>' + detail.content.replace(/\n/g, '<br>') + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    
+    $('#previewContent').html(html);
+    $('#previewModal').modal('show');
+}
+
+function submitRequest() {
+    // 확인 모달을 먼저 표시
+    previewRequest();
+}
+
+function confirmSubmit() {
+    if (!formData || !formData.vehicle_number) {
+        alert('입력된 내용이 없습니다.');
+        return;
+    }
+    
+    const submitBtn = $('button:contains("신청")');
+    const originalText = submitBtn.html();
+    submitBtn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm"></span> 처리 중...');
+    
+    $.ajax({
+        url: '{{ url_for("inspection_request") }}',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(formData),
+        success: function(response) {
+            submitBtn.prop('disabled', false).html(originalText);
+            if (response.success) {
+                alert(response.message);
+                $('#previewModal').modal('hide');
+                // 폼 초기화
+                $('#inspectionForm')[0].reset();
+                $('#detailsTable tbody tr').each(function() {
+                    $(this).find('.detail-content').val('');
+                });
+                location.href = '{{ url_for("inspection_dashboard") }}';
+            } else {
+                alert(response.message || '신청 중 오류가 발생했습니다.');
+            }
+        },
+        error: function() {
+            submitBtn.prop('disabled', false).html(originalText);
+            alert('신청 중 오류가 발생했습니다.');
+        }
+    });
+}
+</script>
+{% endblock %}
+

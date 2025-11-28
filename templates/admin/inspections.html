@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+
+{% block title %}검수신청관리 - 위카아라이 검수시스템{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="page-header">
+        <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline-secondary mb-3">
+            <i class="bi bi-arrow-left"></i> 관리자메인페이지로
+        </a>
+        <h2><i class="bi bi-clipboard-check"></i> 검수신청관리</h2>
+    </div>
+    
+    <div class="filter-box">
+        <form method="GET" class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label">시작일</label>
+                <input type="date" class="form-control" name="start_date" value="{{ start_date }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">종료일</label>
+                <input type="date" class="form-control" name="end_date" value="{{ end_date }}">
+            </div>
+            <div class="col-md-6 d-flex align-items-end gap-2">
+                <button type="submit" class="btn btn-primary">검색</button>
+                <a href="{{ url_for('admin_inspections_export_excel', start_date=start_date, end_date=end_date) }}" class="btn btn-success">
+                    <i class="bi bi-file-earmark-excel"></i> 엑셀저장
+                </a>
+                <a href="{{ url_for('admin_inspections_export_pdf', start_date=start_date, end_date=end_date) }}" class="btn btn-danger">
+                    <i class="bi bi-file-earmark-pdf"></i> PDF저장
+                </a>
+            </div>
+        </form>
+    </div>
+    
+    <div class="table-container">
+        <div class="table-wrapper">
+            <div class="table-responsive">
+                <table class="table table-bordered table-hover">
+                    <thead class="table-fixed-header">
+                        <tr>
+                            <th>신청일</th>
+                            <th>차량번호</th>
+                            <th>출품번호</th>
+                            <th>주차번호</th>
+                            <th>검수신청</th>
+                            <th>평가답변</th>
+                            <th>답변일</th>
+                            <th>확인</th>
+                            <th>번역</th>
+                            <th>전송</th>
+                            <th>전송일</th>
+                            <th>작업</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for inspection in inspections %}
+                        <tr>
+                            <td>{{ inspection.request_date[:19] if inspection.request_date else '' }}</td>
+                            <td>{{ inspection.vehicle_number or '' }}</td>
+                            <td>{{ inspection.lot_number or '' }}</td>
+                            <td>{{ inspection.parking_number or '' }}</td>
+                            <td>{{ inspection.inspection_contents or '' }}</td>
+                            <td>{{ inspection.response_contents or '' }}</td>
+                            <td>{{ inspection.response_date[:19] if inspection.response_date else '' }}</td>
+                            <td>
+                                <button class="btn btn-sm btn-info" onclick="showInspectionDetails({{ inspection.id }})">
+                                    <i class="bi bi-eye"></i> 확인
+                                </button>
+                            </td>
+                            <td>
+                                <a href="{{ url_for('admin_inspection_translate', request_id=inspection.id) }}" 
+                                   class="btn btn-sm btn-warning" target="_blank">
+                                    <i class="bi bi-translate"></i> 번역
+                                </a>
+                            </td>
+                            <td>
+                                {% if not inspection.sent_date %}
+                                <button class="btn btn-sm btn-primary" onclick="sendResult({{ inspection.id }})">
+                                    <i class="bi bi-send"></i> 전송
+                                </button>
+                                {% else %}
+                                <span class="badge badge-success">전송완료</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ inspection.sent_date[:19] if inspection.sent_date else '' }}</td>
+                            <td>-</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentInspectionId = null;
+
+function sendResult(requestId) {
+    if (confirm('검수 결과를 전송하시겠습니까?')) {
+        $.ajax({
+            url: '/admin/inspections/' + requestId + '/send',
+            method: 'POST',
+            success: function(response) {
+                if (response.success) {
+                    alert('전송되었습니다.');
+                    location.reload();
+                }
+            }
+        });
+    }
+}
+</script>
+{% endblock %}
+

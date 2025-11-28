@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+
+{% block title %}검수신청 상세 - 위카아라이 검수시스템{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="page-header">
+        <button onclick="window.close()" class="btn btn-outline-secondary mb-3">
+            <i class="bi bi-arrow-left"></i> 이전페이지로
+        </button>
+        <h2><i class="bi bi-clipboard-check"></i> 검수신청 상세</h2>
+    </div>
+    
+    <div class="table-container">
+        <table class="table table-bordered">
+            <tr>
+                <th width="150">신청일</th>
+                <td>{{ request_info.request_date[:19] if request_info.request_date else '' }}</td>
+                <th width="150">차량번호</th>
+                <td>{{ request_info.vehicle_number or '' }}</td>
+            </tr>
+            <tr>
+                <th>출품번호</th>
+                <td>{{ request_info.lot_number or '' }}</td>
+                <th>주차번호</th>
+                <td>{{ request_info.parking_number or '' }}</td>
+            </tr>
+            <tr>
+                <th>신청자</th>
+                <td>{{ request_info.user_name or '' }}</td>
+                <th>평가사명</th>
+                <td>{{ request_info.evaluator_name or '' }}</td>
+            </tr>
+        </table>
+    </div>
+    
+    <div class="table-container">
+        <h4 class="mb-3">검수신청 및 답변내역</h4>
+        <div class="table-responsive">
+            <table class="table table-bordered">
+                <thead>
+                    <tr>
+                        <th width="80">순</th>
+                        <th>검수신청내역</th>
+                        <th>답변내역</th>
+                        <th>비고</th>
+                    </tr>
+                </thead>
+                <tbody id="detailsTableBody">
+                    {% for detail in inspection_details %}
+                    <tr data-detail-id="{{ detail.id }}">
+                        <td>{{ detail.sequence }}</td>
+                        <td>
+                            <input type="text" class="form-control form-control-sm inspection-content" 
+                                   value="{{ detail.content }}" data-original="{{ detail.content }}" disabled>
+                        </td>
+                        <td>
+                            {% set found = false %}
+                            {% for resp_detail in response_details %}
+                                {% if resp_detail.sequence == detail.sequence %}
+                                    <input type="text" class="form-control form-control-sm response-content" 
+                                           value="{{ resp_detail.content }}" 
+                                           data-response-id="{{ resp_detail.id }}"
+                                           data-original="{{ resp_detail.content }}" disabled>
+                                    {% set found = true %}
+                                {% endif %}
+                            {% endfor %}
+                            {% if not found %}
+                                <input type="text" class="form-control form-control-sm response-content" 
+                                       value="" data-response-id="" data-original="" disabled>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% set found = false %}
+                            {% for resp_detail in response_details %}
+                                {% if resp_detail.sequence == detail.sequence %}
+                                    <input type="text" class="form-control form-control-sm response-note" 
+                                           value="{{ resp_detail.note or '' }}" 
+                                           data-response-id="{{ resp_detail.id }}"
+                                           data-original="{{ resp_detail.note or '' }}" disabled>
+                                    {% set found = true %}
+                                {% endif %}
+                            {% endfor %}
+                            {% if not found %}
+                                <input type="text" class="form-control form-control-sm response-note" 
+                                       value="" data-response-id="" data-original="" disabled>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <div class="text-center my-4">
+        <img src="{{ url_for('static', filename='images/lpgo.png') }}" alt="위카 로고" style="max-width: 150px;">
+        <p class="mt-2"><strong>위카모빌리티 주식회사</strong></p>
+    </div>
+    
+    <div class="text-center mb-4">
+        <button type="button" class="btn btn-warning" onclick="enableEdit()">
+            <i class="bi bi-pencil"></i> 수정
+        </button>
+        <button type="button" class="btn btn-success" onclick="saveDetails()" id="saveBtn" style="display:none;">
+            <i class="bi bi-check"></i> 저장
+        </button>
+        <button class="btn btn-primary" onclick="exportExcel()">
+            <i class="bi bi-file-earmark-excel"></i> 엑셀저장
+        </button>
+        <button class="btn btn-danger" onclick="exportPDF()">
+            <i class="bi bi-file-earmark-pdf"></i> PDF저장
+        </button>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const requestId = {{ request_info.id }};
+
+function enableEdit() {
+    $('.inspection-content, .response-content, .response-note').prop('disabled', false);
+    $('#saveBtn').show();
+    $('button:contains("수정")').hide();
+}
+
+function saveDetails() {
+    const details = [];
+    $('#detailsTableBody tr').each(function() {
+        const detailId = $(this).data('detail-id');
+        const inspectionContent = $(this).find('.inspection-content').val();
+        const responseContent = $(this).find('.response-content').val();
+        const responseNote = $(this).find('.response-note').val();
+        const responseId = $(this).find('.response-content').data('response-id');
+        const sequence = $(this).find('td:first').text();
+        
+        details.push({
+            detail_id: detailId,
+            sequence: parseInt(sequence),
+            inspection_content: inspectionContent,
+            response_content: responseContent,
+            response_note: responseNote,
+            response_id: responseId
+        });
+    });
+    
+    $.ajax({
+        url: '/admin/inspections/' + requestId + '/details/save',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({details: details}),
+        success: function(response) {
+            if (response.success) {
+                alert('저장되었습니다.');
+                $('.inspection-content, .response-content, .response-note').prop('disabled', true);
+                $('#saveBtn').hide();
+                $('button:contains("수정")').show();
+            } else {
+                alert(response.message || '저장 중 오류가 발생했습니다.');
+            }
+        }
+    });
+}
+
+function exportExcel() {
+    window.location.href = '/admin/inspections/' + requestId + '/export/excel';
+}
+
+function exportPDF() {
+    window.location.href = '/admin/inspections/' + requestId + '/export/pdf';
+}
+</script>
+{% endblock %}
+

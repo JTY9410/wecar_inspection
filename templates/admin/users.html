@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+
+{% block title %}회원관리 - 위카아라이 검수시스템{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="page-header">
+        <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline-secondary mb-3">
+            <i class="bi bi-arrow-left"></i> 관리자메인페이지로
+        </a>
+        <h2><i class="bi bi-people"></i> 회원관리</h2>
+    </div>
+    
+    <div class="table-container">
+        <div class="table-wrapper">
+            <div class="table-responsive">
+                <table class="table table-bordered table-hover">
+                    <thead class="table-fixed-header">
+                        <tr>
+                            <th>회원가입구분</th>
+                            <th>아이디</th>
+                            <th>패스워드</th>
+                            <th>패스워드확인</th>
+                            <th>회사</th>
+                            <th>직책</th>
+                            <th>이름</th>
+                            <th>작업</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for user in users %}
+                        <tr data-user-id="{{ user.id }}">
+                            <td>
+                                <select class="form-select form-select-sm" name="user_type" {% if not user.id %}disabled{% endif %}>
+                                    <option value="검수신청" {% if user.user_type == '검수신청' %}selected{% endif %}>검수신청</option>
+                                    <option value="평가사" {% if user.user_type == '평가사' %}selected{% endif %}>평가사</option>
+                                    <option value="관리자" {% if user.user_type == '관리자' %}selected{% endif %}>관리자</option>
+                                </select>
+                            </td>
+                            <td><input type="text" class="form-control form-control-sm" name="username" value="{{ user.username }}" disabled></td>
+                            <td><input type="password" class="form-control form-control-sm" name="password" placeholder="변경시만 입력" disabled></td>
+                            <td><input type="password" class="form-control form-control-sm" name="password_confirm" placeholder="변경시만 입력" disabled></td>
+                            <td><input type="text" class="form-control form-control-sm" name="company" value="{{ user.company or '' }}" disabled></td>
+                            <td><input type="text" class="form-control form-control-sm" name="position" value="{{ user.position or '' }}" disabled></td>
+                            <td><input type="text" class="form-control form-control-sm" name="name" value="{{ user.name }}" disabled></td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button class="btn btn-sm btn-warning edit-btn" onclick="editUser(this)">
+                                        <i class="bi bi-pencil"></i> 수정
+                                    </button>
+                                    <button class="btn btn-sm btn-success save-btn" onclick="saveUser(this)" style="display:none;">
+                                        <i class="bi bi-check"></i> 저장
+                                    </button>
+                                    <button class="btn btn-sm btn-danger delete-btn" onclick="deleteUser({{ user.id }})">
+                                        <i class="bi bi-trash"></i> 삭제
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function editUser(btn) {
+    const row = $(btn).closest('tr');
+    row.find('input, select').prop('disabled', false);
+    row.find('.edit-btn').hide();
+    row.find('.save-btn').show();
+    row.addClass('editing');
+}
+
+function saveUser(btn) {
+    const row = $(btn).closest('tr');
+    const userId = row.data('user-id');
+    const password = row.find('[name="password"]').val();
+    const passwordConfirm = row.find('[name="password_confirm"]').val();
+    
+    if (password && password !== passwordConfirm) {
+        alert('비밀번호가 일치하지 않습니다.');
+        return;
+    }
+    
+    const data = {
+        id: userId,
+        user_type: row.find('[name="user_type"]').val(),
+        username: row.find('[name="username"]').val(),
+        password: password,
+        password_confirm: passwordConfirm,
+        company: row.find('[name="company"]').val(),
+        position: row.find('[name="position"]').val(),
+        name: row.find('[name="name"]').val()
+    };
+    
+    $.ajax({
+        url: '{{ url_for("admin_users_update") }}',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(data),
+        success: function(response) {
+            if (response.success) {
+                alert('저장되었습니다.');
+                row.find('input, select').prop('disabled', true);
+                row.find('.edit-btn').show();
+                row.find('.save-btn').hide();
+                row.removeClass('editing');
+                row.find('[name="password"]').val('');
+                row.find('[name="password_confirm"]').val('');
+            } else {
+                alert(response.message || '저장 중 오류가 발생했습니다.');
+            }
+        },
+        error: function() {
+            alert('저장 중 오류가 발생했습니다.');
+        }
+    });
+}
+
+function deleteUser(userId) {
+    if (confirm('정말 삭제하시겠습니까?')) {
+        $.ajax({
+            url: '{{ url_for("admin_users_delete") }}',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({id: userId}),
+            success: function(response) {
+                if (response.success) {
+                    alert('삭제되었습니다.');
+                    location.reload();
+                }
+            }
+        });
+    }
+}
+</script>
+{% endblock %}
+

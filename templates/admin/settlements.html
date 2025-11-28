@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+
+{% block title %}정산관리 - 위카아라이 검수시스템{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="page-header">
+        <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline-secondary mb-3">
+            <i class="bi bi-arrow-left"></i> 관리자페이지로
+        </a>
+        <h2><i class="bi bi-calculator"></i> 정산관리</h2>
+    </div>
+    
+    <div class="filter-box">
+        <form method="GET" class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label">시작일</label>
+                <input type="date" class="form-control" name="start_date" value="{{ start_date }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">종료일</label>
+                <input type="date" class="form-control" name="end_date" value="{{ end_date }}">
+            </div>
+            <div class="col-md-6 d-flex align-items-end gap-2">
+                <button type="submit" class="btn btn-primary">조회</button>
+                <button type="button" class="btn btn-info" onclick="showPreview()">화면저장</button>
+                <button type="button" class="btn btn-success" onclick="saveSettlement()">저장</button>
+            </div>
+        </form>
+    </div>
+    
+    {% if settlements %}
+    <div class="table-container">
+        <div class="table-wrapper">
+            <div class="table-responsive">
+                <table class="table table-bordered table-hover" id="settlementTable">
+                    <thead class="table-fixed-header">
+                        <tr>
+                            <th>일자</th>
+                            <th>평가사</th>
+                            <th>건수</th>
+                            <th>금액</th>
+                            <th>VAT</th>
+                            <th>청구액</th>
+                            <th>작업</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in settlements %}
+                            {% if item.type == 'data' %}
+                            <tr>
+                                <td>{{ item.settlement_date }}</td>
+                                <td>{{ item.evaluator_name }}</td>
+                                <td>{{ item.count }}</td>
+                                <td>{{ "{:,}".format(item.amount) }}</td>
+                                <td>{{ "{:,}".format(item.vat) }}</td>
+                                <td>{{ "{:,}".format(item.total_amount) }}</td>
+                                <td>-</td>
+                            </tr>
+                            {% elif item.type == 'subtotal' %}
+                            <tr class="table-info">
+                                <td colspan="2"><strong>소계 ({{ item.date }})</strong></td>
+                                <td><strong>{{ item.count }}</strong></td>
+                                <td><strong>{{ "{:,}".format(item.amount) }}</strong></td>
+                                <td><strong>{{ "{:,}".format(item.vat) }}</strong></td>
+                                <td><strong>{{ "{:,}".format(item.total_amount) }}</strong></td>
+                                <td></td>
+                            </tr>
+                            {% elif item.type == 'grandtotal' %}
+                            <tr class="table-warning">
+                                <td colspan="2"><strong>합계</strong></td>
+                                <td><strong>{{ item.count }}</strong></td>
+                                <td><strong>{{ "{:,}".format(item.amount) }}</strong></td>
+                                <td><strong>{{ "{:,}".format(item.vat) }}</strong></td>
+                                <td><strong>{{ "{:,}".format(item.total_amount) }}</strong></td>
+                                <td></td>
+                            </tr>
+                            {% endif %}
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+    
+    {% if saved_settlements %}
+    <div class="table-container mt-4">
+        <h4>저장된 정산내역</h4>
+        <div class="row">
+            {% for saved in saved_settlements %}
+            <div class="col-md-3 mb-2">
+                <a href="{{ url_for('admin_settlement_view', settlement_id=saved.id) }}" 
+                   class="btn btn-outline-primary btn-block">
+                    {{ saved.name }}
+                </a>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- 화면저장 모달 -->
+<div class="modal fade" id="previewModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">정산내역 미리보기</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="previewContent">
+                <!-- 미리보기 내용이 여기에 표시됩니다 -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-arrow-left"></i> 이전페이지로
+                </button>
+                <button type="button" class="btn btn-primary" onclick="saveToDatabase()">
+                    <i class="bi bi-database"></i> 데이터베이스저장
+                </button>
+                <button type="button" class="btn btn-success" onclick="exportSettlementExcel()">
+                    <i class="bi bi-file-earmark-excel"></i> 엑셀저장
+                </button>
+                <button type="button" class="btn btn-danger" onclick="exportSettlementPDF()">
+                    <i class="bi bi-file-earmark-pdf"></i> PDF저장
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function showPreview() {
+    const startDate = $('[name="start_date"]').val();
+    const endDate = $('[name="end_date"]').val();
+    
+    if (!startDate || !endDate) {
+        alert('시작일과 종료일을 입력하고 조회해주세요.');
+        return;
+    }
+    
+    const tableHtml = $('#settlementTable').html();
+    $('#previewContent').html('<div class="table-responsive">' + 
+        '<table class="table table-bordered table-hover">' + 
+        '<thead class="table-fixed-header">' + $('#settlementTable thead').html() + '</thead>' +
+        '<tbody>' + $('#settlementTable tbody').html() + '</tbody>' +
+        '</table></div>');
+    $('#previewModal').modal('show');
+}
+
+function saveSettlement() {
+    const startDate = $('[name="start_date"]').val();
+    const endDate = $('[name="end_date"]').val();
+    
+    if (!startDate || !endDate) {
+        alert('시작일과 종료일을 입력해주세요.');
+        return;
+    }
+    
+    const tableData = [];
+    $('#settlementTable tbody tr').each(function() {
+        const row = [];
+        $(this).find('td').each(function() {
+            row.push($(this).text().trim());
+        });
+        if (row.length > 0) {
+            tableData.push(row);
+        }
+    });
+    
+    $.ajax({
+        url: '{{ url_for("admin_settlements_save") }}',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({
+            start_date: startDate,
+            end_date: endDate,
+            data: tableData
+        }),
+        success: function(response) {
+            if (response.success) {
+                alert('저장되었습니다.');
+                location.reload();
+            } else {
+                alert(response.message || '저장 중 오류가 발생했습니다.');
+            }
+        },
+        error: function() {
+            alert('저장 중 오류가 발생했습니다.');
+        }
+    });
+}
+
+function exportSettlementExcel() {
+    const startDate = $('[name="start_date"]').val();
+    const endDate = $('[name="end_date"]').val();
+    if (startDate && endDate) {
+        window.location.href = '{{ url_for("admin_settlements_export_excel") }}?start_date=' + startDate + '&end_date=' + endDate;
+    } else {
+        alert('시작일과 종료일을 입력하고 조회해주세요.');
+    }
+}
+
+function exportSettlementPDF() {
+    const startDate = $('[name="start_date"]').val();
+    const endDate = $('[name="end_date"]').val();
+    if (startDate && endDate) {
+        window.location.href = '{{ url_for("admin_settlements_export_pdf") }}?start_date=' + startDate + '&end_date=' + endDate;
+    } else {
+        alert('시작일과 종료일을 입력하고 조회해주세요.');
+    }
+}
+
+function saveToDatabase() {
+    saveSettlement();
+    $('#previewModal').modal('hide');
+}
+</script>
+{% endblock %}
+

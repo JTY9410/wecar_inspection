@@ -1,0 +1,310 @@
+/* K-옥션 스타일 참조한 위카아라이 검수시스템 스타일 */
+:root {
+    --primary-color: #366092;
+    --secondary-color: #f8f9fa;
+    --text-color: #333;
+    --border-color: #dee2e6;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Malgun Gothic', '맑은 고딕', Arial, sans-serif;
+    color: var(--text-color);
+    background-color: #f5f5f5;
+}
+
+/* 로그인 페이지 */
+.login-container {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 1rem;
+}
+
+.login-box {
+    background: white;
+    padding: 3rem;
+    border-radius: 10px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+    width: 100%;
+    max-width: 450px;
+}
+
+.logo-img {
+    max-width: 200px;
+    height: auto;
+    display: block;
+    margin: 0 auto;
+}
+
+.login-box h2 {
+    color: var(--primary-color);
+    font-size: 1.75rem;
+    letter-spacing: 2px;
+}
+
+/* 테이블 스타일 */
+.table-container {
+    background: white;
+    border-radius: 8px;
+    padding: 1.5rem;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    margin-bottom: 2rem;
+}
+
+.table-wrapper {
+    overflow-x: auto;
+    position: relative;
+}
+
+.table-fixed-header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--primary-color);
+    color: white;
+}
+
+.table-fixed-header th {
+    background: var(--primary-color) !important;
+    color: white !important;
+    font-weight: 600;
+    padding: 12px 15px;
+    border: 1px solid rgba(255,255,255,0.2);
+}
+
+.table-responsive {
+    max-height: 600px;
+    overflow-y: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+table th, table td {
+    padding: 10px 15px;
+    text-align: left;
+    border: 1px solid var(--border-color);
+    white-space: nowrap;
+}
+
+table th {
+    background-color: var(--primary-color);
+    color: white;
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+}
+
+table tbody tr:hover {
+    background-color: #f8f9fa;
+}
+
+table tbody tr:nth-child(even) {
+    background-color: #fafafa;
+}
+
+/* 버튼 스타일 */
+.btn-primary {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.btn-primary:hover {
+    background-color: #2a4a6f;
+    border-color: #2a4a6f;
+}
+
+.btn-sm {
+    padding: 0.25rem 0.75rem;
+    font-size: 0.875rem;
+}
+
+/* 대시보드 카드 */
+.dashboard-card {
+    background: white;
+    border-radius: 8px;
+    padding: 2rem;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    margin-bottom: 2rem;
+    transition: transform 0.2s;
+}
+
+.dashboard-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+}
+
+.dashboard-card h3 {
+    color: var(--primary-color);
+    margin-bottom: 1rem;
+}
+
+/* 검색 필터 */
+.filter-box {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+/* 모달 스타일 */
+.modal-content {
+    border-radius: 8px;
+}
+
+.modal-header {
+    background-color: var(--primary-color);
+    color: white;
+    border-radius: 8px 8px 0 0;
+}
+
+.modal-header .btn-close {
+    filter: invert(1);
+}
+
+/* 입력 폼 스타일 */
+.form-control, .form-select {
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 0.5rem 0.75rem;
+}
+
+.form-control:focus, .form-select:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 0.2rem rgba(54, 96, 146, 0.25);
+}
+
+/* 반응형 디자인 */
+@media (max-width: 768px) {
+    .login-box {
+        padding: 2rem 1.5rem;
+        margin: 1rem;
+    }
+    
+    .table-container {
+        padding: 1rem;
+    }
+    
+    table {
+        font-size: 12px;
+    }
+    
+    table th, table td {
+        padding: 8px 10px;
+    }
+    
+    .dashboard-card {
+        padding: 1.5rem;
+    }
+}
+
+/* 스크롤바 스타일 */
+.table-responsive::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+}
+
+.table-responsive::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+
+.table-responsive::-webkit-scrollbar-thumb {
+    background: var(--primary-color);
+    border-radius: 4px;
+}
+
+.table-responsive::-webkit-scrollbar-thumb:hover {
+    background: #2a4a6f;
+}
+
+/* 페이지 헤더 */
+.page-header {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.page-header h2 {
+    color: var(--primary-color);
+    margin: 0;
+}
+
+/* 액션 버튼 그룹 */
+.action-buttons {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+/* 상태 배지 */
+.badge {
+    padding: 0.35em 0.65em;
+    font-size: 0.875em;
+    font-weight: 600;
+}
+
+.badge-success {
+    background-color: #28a745;
+}
+
+.badge-warning {
+    background-color: #ffc107;
+    color: #333;
+}
+
+.badge-info {
+    background-color: #17a2b8;
+}
+
+.badge-danger {
+    background-color: #dc3545;
+}
+
+/* 로딩 스피너 */
+.spinner-border-sm {
+    width: 1rem;
+    height: 1rem;
+    border-width: 0.15em;
+}
+
+/* 알림 메시지 */
+.alert {
+    border-radius: 6px;
+    margin-bottom: 1rem;
+}
+
+/* 텍스트 영역 */
+textarea.form-control {
+    min-height: 100px;
+    resize: vertical;
+}
+
+/* 인라인 편집 */
+.editable {
+    cursor: pointer;
+}
+
+.editable:hover {
+    background-color: #fff3cd;
+}
+
+.editing {
+    background-color: #fff3cd;
+}
+

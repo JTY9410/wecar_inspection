@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block title %}검수신청내역 - 위카아라이 검수시스템{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="page-header">
+        <a href="{{ url_for('inspection_dashboard') }}" class="btn btn-outline-secondary mb-3">
+            <i class="bi bi-arrow-left"></i> 검수대시보드 페이지로
+        </a>
+        <h2><i class="bi bi-list-check"></i> 검수신청내역</h2>
+    </div>
+    
+    <div class="filter-box">
+        <form method="GET" class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label">시작일</label>
+                <input type="date" class="form-control" name="start_date" value="{{ start_date }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">종료일</label>
+                <input type="date" class="form-control" name="end_date" value="{{ end_date }}">
+            </div>
+            <div class="col-md-6 d-flex align-items-end gap-2">
+                <button type="submit" class="btn btn-primary">검색</button>
+                <button type="button" class="btn btn-success" onclick="exportExcel()">
+                    <i class="bi bi-file-earmark-excel"></i> 엑셀저장
+                </button>
+                <button type="button" class="btn btn-danger" onclick="exportPDF()">
+                    <i class="bi bi-file-earmark-pdf"></i> PDF저장
+                </button>
+            </div>
+        </form>
+    </div>
+    
+    <div class="table-container">
+        <div class="table-wrapper">
+            <div class="table-responsive">
+                <table class="table table-bordered table-hover">
+                    <thead class="table-fixed-header">
+                        <tr>
+                            <th>신청일</th>
+                            <th>차량번호</th>
+                            <th>출품번호</th>
+                            <th>주차번호</th>
+                            <th>검수신청</th>
+                            <th>평가답변</th>
+                            <th>답변일</th>
+                            <th>확인</th>
+                            <th>번역</th>
+                            <th>비고</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for inspection in inspections %}
+                        <tr>
+                            <td>{{ inspection.request_date[:19] if inspection.request_date else '' }}</td>
+                            <td>{{ inspection.vehicle_number or '' }}</td>
+                            <td>{{ inspection.lot_number or '' }}</td>
+                            <td>{{ inspection.parking_number or '' }}</td>
+                            <td>{{ inspection.inspection_contents or '' }}</td>
+                            <td>{{ inspection.response_contents or '' }}</td>
+                            <td>{{ inspection.response_date[:19] if inspection.response_date else '' }}</td>
+                            <td>
+                                <button class="btn btn-sm btn-info" onclick="viewDetails({{ inspection.id }})">
+                                    <i class="bi bi-eye"></i> 확인
+                                </button>
+                            </td>
+                            <td>
+                                {% if inspection.response_date %}
+                                <button class="btn btn-sm btn-warning" onclick="translate({{ inspection.id }})">
+                                    <i class="bi bi-translate"></i> 번역
+                                </button>
+                                {% else %}
+                                <span class="badge badge-secondary">대기중</span>
+                                {% endif %}
+                            </td>
+                            <td>-</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function exportExcel() {
+    const startDate = $('[name="start_date"]').val();
+    const endDate = $('[name="end_date"]').val();
+    if (startDate && endDate) {
+        window.location.href = '{{ url_for("inspection_history_export_excel") }}?start_date=' + startDate + '&end_date=' + endDate;
+    } else {
+        alert('시작일과 종료일을 입력하고 검색해주세요.');
+    }
+}
+
+function exportPDF() {
+    const startDate = $('[name="start_date"]').val();
+    const endDate = $('[name="end_date"]').val();
+    if (startDate && endDate) {
+        window.location.href = '{{ url_for("inspection_history_export_pdf") }}?start_date=' + startDate + '&end_date=' + endDate;
+    } else {
+        alert('시작일과 종료일을 입력하고 검색해주세요.');
+    }
+}
+
+function viewDetails(requestId) {
+    window.open('/admin/inspections/' + requestId + '/details', '_blank', 'width=1200,height=800');
+}
+
+function translate(requestId) {
+    window.open('/admin/inspections/' + requestId + '/translate', '_blank', 'width=1200,height=800');
+}
+</script>
+{% endblock %}
+

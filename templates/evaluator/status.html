@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+
+{% block title %}신청현황 - 위카아라이 검수시스템{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="page-header">
+        <a href="{{ url_for('evaluator_dashboard') }}" class="btn btn-outline-secondary mb-3">
+            <i class="bi bi-arrow-left"></i> 평가사대시보드 페이지로
+        </a>
+        <h2><i class="bi bi-clipboard-data"></i> 신청현황</h2>
+    </div>
+    
+    <div class="filter-box">
+        <form method="GET" class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label">시작일</label>
+                <input type="date" class="form-control" name="start_date" value="{{ start_date }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">종료일</label>
+                <input type="date" class="form-control" name="end_date" value="{{ end_date }}">
+            </div>
+            <div class="col-md-6 d-flex align-items-end gap-2">
+                <button type="submit" class="btn btn-primary">검색</button>
+                <button type="button" class="btn btn-success" onclick="exportExcel()">
+                    <i class="bi bi-file-earmark-excel"></i> 엑셀저장
+                </button>
+                <button type="button" class="btn btn-danger" onclick="exportPDF()">
+                    <i class="bi bi-file-earmark-pdf"></i> PDF저장
+                </button>
+            </div>
+        </form>
+    </div>
+    
+    <div class="table-container">
+        <div class="table-wrapper">
+            <div class="table-responsive">
+                <table class="table table-bordered table-hover">
+                    <thead class="table-fixed-header">
+                        <tr>
+                            <th>구분</th>
+                            <th>신청일</th>
+                            <th>차량번호</th>
+                            <th>출품번호</th>
+                            <th>주차번호</th>
+                            <th>검수신청</th>
+                            <th>평가사입력</th>
+                            <th>작업</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for req in requests %}
+                        <tr>
+                            <td>
+                                <span class="badge {% if req.status == '신청' %}badge-info{% elif req.status == '평가사배정' %}badge-warning{% else %}badge-success{% endif %}">
+                                    {{ req.status }}
+                                </span>
+                            </td>
+                            <td>{{ req.request_date[:19] if req.request_date else '' }}</td>
+                            <td>{{ req.vehicle_number or '' }}</td>
+                            <td>{{ req.lot_number or '' }}</td>
+                            <td>{{ req.parking_number or '' }}</td>
+                            <td>{{ req.inspection_contents or '' }}</td>
+                            <td>
+                                <button class="btn btn-sm btn-primary" onclick="assignEvaluator({{ req.id }}, {{ req.assignment_id }})">
+                                    <i class="bi bi-person-plus"></i> 입력
+                                </button>
+                            </td>
+                            <td>
+                                {% if req.status == '평가사배정' %}
+                                <button class="btn btn-sm btn-success" onclick="completeEvaluation({{ req.assignment_id }})">
+                                    <i class="bi bi-check-circle"></i> 평가완료
+                                </button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 평가사 배정 모달 -->
+<div class="modal fade" id="assignModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">평가사 배정</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">평가사 선택</label>
+                    <select class="form-select" id="evaluatorSelect">
+                        <option value="">선택하세요</option>
+                        {% for evaluator in evaluators %}
+                        <option value="{{ evaluator.id }}" data-name="{{ evaluator.name }}">{{ evaluator.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">또는 수기입력</label>
+                    <input type="text" class="form-control" id="evaluatorName" placeholder="평가사 이름 입력">
+                    <small class="form-text text-muted">평가사회원 리스트에서 선택하거나 수기로 입력할 수 있습니다.</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-primary" onclick="confirmAssign()">확인</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentRequestId = null;
+let currentAssignmentId = null;
+
+function assignEvaluator(requestId, assignmentId) {
+    currentRequestId = requestId;
+    currentAssignmentId = assignmentId;
+    $('#assignModal').modal('show');
+}
+
+function confirmAssign() {
+    const evaluatorId = $('#evaluatorSelect').val();
+    const evaluatorName = $('#evaluatorName').val();
+    
+    if (!evaluatorId && !evaluatorName) {
+        alert('평가사를 선택하거나 입력해주세요.');
+        return;
+    }
+    
+    $.ajax({
+        url: '{{ url_for("evaluator_status_assign") }}',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({
+            request_id: currentRequestId,
+            evaluator_id: evaluatorId,
+            evaluator_name: evaluatorName
+        }),
+        success: function(response) {
+            if (response.success) {
+                alert('배정되었습니다.');
+                $('#assignModal').modal('hide');
+                location.reload();
+            }
+        }
+    });
+}
+
+function completeEvaluation(assignmentId) {
+    if (confirm('평가를 완료하시겠습니까?')) {
+        $.ajax({
+            url: '{{ url_for("evaluator_status_complete") }}',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({assignment_id: assignmentId}),
+            success: function(response) {
+                if (response.success) {
+                    alert('평가가 완료되었습니다.');
+                    location.reload();
+                }
+            }
+        });
+    }
+}
+
+function exportExcel() {
+    const startDate = $('[name="start_date"]').val();
+    const endDate = $('[name="end_date"]').val();
+    if (startDate && endDate) {
+        window.location.href = '{{ url_for("evaluator_status_export_excel") }}?start_date=' + startDate + '&end_date=' + endDate;
+    } else {
+        alert('시작일과 종료일을 입력하고 검색해주세요.');
+    }
+}
+
+function exportPDF() {
+    const startDate = $('[name="start_date"]').val();
+    const endDate = $('[name="end_date"]').val();
+    if (startDate && endDate) {
+        window.location.href = '{{ url_for("evaluator_status_export_pdf") }}?start_date=' + startDate + '&end_date=' + endDate;
+    } else {
+        alert('시작일과 종료일을 입력하고 검색해주세요.');
+    }
+}
+</script>
+{% endblock %}
+

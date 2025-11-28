@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+
+{% block title %}평가답변 - 위카아라이 검수시스템{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="page-header">
+        <a href="{{ url_for('evaluator_dashboard') }}" class="btn btn-outline-secondary mb-3">
+            <i class="bi bi-arrow-left"></i> 평가사대시보드페이지로
+        </a>
+        <h2><i class="bi bi-chat-dots"></i> 평가답변</h2>
+    </div>
+    
+    <div class="filter-box">
+        <form method="GET" class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label">시작일</label>
+                <input type="date" class="form-control" name="start_date" value="{{ start_date }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">종료일</label>
+                <input type="date" class="form-control" name="end_date" value="{{ end_date }}">
+            </div>
+            <div class="col-md-6 d-flex align-items-end gap-2">
+                <button type="submit" class="btn btn-primary">검색</button>
+                <button type="button" class="btn btn-success" onclick="exportExcel()">
+                    <i class="bi bi-file-earmark-excel"></i> 엑셀저장
+                </button>
+                <button type="button" class="btn btn-danger" onclick="exportPDF()">
+                    <i class="bi bi-file-earmark-pdf"></i> PDF저장
+                </button>
+            </div>
+        </form>
+    </div>
+    
+    <div class="table-container">
+        <div class="table-wrapper">
+            <div class="table-responsive">
+                <table class="table table-bordered table-hover">
+                    <thead class="table-fixed-header">
+                        <tr>
+                            <th>신청일</th>
+                            <th>차량번호</th>
+                            <th>출품번호</th>
+                            <th>주차번호</th>
+                            <th>검수신청내역</th>
+                            <th>답변입력</th>
+                            <th>입력내역확인</th>
+                            <th>답변확정</th>
+                            <th>작업</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for req in requests %}
+                        <tr>
+                            <td>{{ req.request_date[:19] if req.request_date else '' }}</td>
+                            <td>{{ req.vehicle_number or '' }}</td>
+                            <td>{{ req.lot_number or '' }}</td>
+                            <td>{{ req.parking_number or '' }}</td>
+                            <td>{{ req.inspection_contents or '' }}</td>
+                            <td>
+                                <button class="btn btn-sm btn-primary" onclick="openResponseForm({{ req.id }})">
+                                    <i class="bi bi-pencil"></i> 입력
+                                </button>
+                            </td>
+                            <td>
+                                {% if req.response_id %}
+                                <button class="btn btn-sm btn-info" onclick="viewResponse({{ req.id }})">
+                                    <i class="bi bi-eye"></i> 확인
+                                </button>
+                                {% else %}
+                                <span class="badge badge-warning">미입력</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if req.confirmed %}
+                                <span class="badge badge-success">확정</span>
+                                {% elif req.response_id %}
+                                <button class="btn btn-sm btn-success" onclick="confirmResponse({{ req.id }})">
+                                    <i class="bi bi-check-circle"></i> 확정
+                                </button>
+                                {% else %}
+                                <span class="badge badge-secondary">대기</span>
+                                {% endif %}
+                            </td>
+                            <td>-</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function openResponseForm(requestId) {
+    // 팝업창으로 열기
+    window.open('/evaluator/response/' + requestId, 'responseForm', 'width=1200,height=800,scrollbars=yes');
+}
+
+function viewResponse(requestId) {
+    openResponseForm(requestId);
+}
+
+function confirmResponse(requestId) {
+    if (confirm('답변을 확정하시겠습니까?')) {
+        $.ajax({
+            url: '{{ url_for("evaluator_response_confirm") }}',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({request_id: requestId}),
+            success: function(response) {
+                if (response.success) {
+                    alert('확정되었습니다.');
+                    location.reload();
+                } else {
+                    alert(response.message || '확정 중 오류가 발생했습니다.');
+                }
+            },
+            error: function() {
+                alert('확정 중 오류가 발생했습니다.');
+            }
+        });
+    }
+}
+
+function exportExcel() {
+    const startDate = $('[name="start_date"]').val();
+    const endDate = $('[name="end_date"]').val();
+    if (startDate && endDate) {
+        window.location.href = '{{ url_for("evaluator_response_export_excel") }}?start_date=' + startDate + '&end_date=' + endDate;
+    } else {
+        alert('시작일과 종료일을 입력하고 검색해주세요.');
+    }
+}
+
+function exportPDF() {
+    const startDate = $('[name="start_date"]').val();
+    const endDate = $('[name="end_date"]').val();
+    if (startDate && endDate) {
+        window.location.href = '{{ url_for("evaluator_response_export_pdf") }}?start_date=' + startDate + '&end_date=' + endDate;
+    } else {
+        alert('시작일과 종료일을 입력하고 검색해주세요.');
+    }
+}
+</script>
+{% endblock %}
+

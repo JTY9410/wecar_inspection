@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}정산내역 보기 - 위카아라이 검수시스템{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="page-header">
+        <a href="{{ url_for('admin_settlements') }}" class="btn btn-outline-secondary mb-3">
+            <i class="bi bi-arrow-left"></i> 이전페이지로
+        </a>
+        <h2><i class="bi bi-calculator"></i> 정산내역: {{ settlement.name }}</h2>
+    </div>
+    
+    <div class="table-container">
+        <div class="table-responsive">
+            <table class="table table-bordered">
+                <thead>
+                    <tr>
+                        <th>일자</th>
+                        <th>평가사</th>
+                        <th>건수</th>
+                        <th>금액</th>
+                        <th>VAT</th>
+                        <th>청구액</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in data %}
+                    <tr>
+                        {% for cell in row %}
+                        <td>{{ cell }}</td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+
+
+
+

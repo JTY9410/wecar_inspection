@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}검수신청 대시보드 - 위카아라이 검수시스템{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="page-header">
+        <h2><i class="bi bi-speedometer2"></i> 검수신청 대시보드</h2>
+        <p class="text-muted mb-0">안녕하세요, {{ session.name }}님</p>
+    </div>
+    
+    <div class="row">
+        <div class="col-md-6 mb-4">
+            <div class="dashboard-card text-center">
+                <i class="bi bi-file-earmark-plus fs-1 text-primary mb-3"></i>
+                <h3>검수신청</h3>
+                <p class="text-muted">새로운 검수신청을 등록합니다.</p>
+                <a href="{{ url_for('inspection_request') }}" class="btn btn-primary">이동하기</a>
+            </div>
+        </div>
+        <div class="col-md-6 mb-4">
+            <div class="dashboard-card text-center">
+                <i class="bi bi-list-check fs-1 text-primary mb-3"></i>
+                <h3>검수신청내역</h3>
+                <p class="text-muted">등록한 검수신청 내역을 확인합니다.</p>
+                <a href="{{ url_for('inspection_history') }}" class="btn btn-primary">이동하기</a>
+            </div>
+        </div>
+    </div>
+    
+    <div class="text-center mt-4">
+        <a href="{{ url_for('logout') }}" class="btn btn-outline-secondary">로그아웃</a>
+    </div>
+</div>
+{% endblock %}
+
+
+
+
+
