@@ -61,41 +61,71 @@ body {
 
 .table-wrapper {
     overflow-x: auto;
+    overflow-y: auto;
     position: relative;
+    max-height: 70vh;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+
+/* 가로 스크롤바 강조 */
+.table-wrapper::-webkit-scrollbar {
+    height: 12px;
+    width: 12px;
+}
+
+.table-wrapper::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 6px;
+}
+
+.table-wrapper::-webkit-scrollbar-thumb {
+    background: var(--primary-color);
+    border-radius: 6px;
+}
+
+.table-wrapper::-webkit-scrollbar-thumb:hover {
+    background: #2a4a6f;
 }
 
 .table-fixed-header {
     position: sticky;
     top: 0;
-    z-index: 10;
+    z-index: 100;
     background: var(--primary-color);
     color: white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
 .table-fixed-header th {
     background: var(--primary-color) !important;
     color: white !important;
     font-weight: 600;
-    padding: 12px 15px;
+    padding: 15px 20px;
     border: 1px solid rgba(255,255,255,0.2);
+    min-width: 120px;
+    white-space: nowrap;
 }
 
 .table-responsive {
     max-height: 600px;
     overflow-y: auto;
+    overflow-x: auto;
 }
 
 table {
     width: 100%;
     border-collapse: collapse;
     font-size: 14px;
+    min-width: 100%;
 }
 
 table th, table td {
-    padding: 10px 15px;
+    padding: 12px 20px;
     text-align: left;
     border: 1px solid var(--border-color);
     white-space: nowrap;
+    min-width: 120px;
 }
 
 table th {
@@ -104,7 +134,7 @@ table th {
     font-weight: 600;
     position: sticky;
     top: 0;
-    z-index: 5;
+    z-index: 10;
 }
 
 table tbody tr:hover {
@@ -198,16 +228,57 @@ table tbody tr:nth-child(even) {
         padding: 1rem;
     }
     
+    .table-wrapper {
+        max-height: 60vh;
+    }
+    
     table {
         font-size: 12px;
     }
     
     table th, table td {
-        padding: 8px 10px;
+        padding: 10px 12px;
+        min-width: 100px;
+    }
+    
+    .table-fixed-header th {
+        padding: 12px 15px;
+        font-size: 12px;
     }
     
     .dashboard-card {
         padding: 1.5rem;
+    }
+    
+    .filter-box {
+        padding: 1rem;
+    }
+    
+    .page-header {
+        padding: 1rem;
+    }
+    
+    .action-buttons {
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+    
+    .action-buttons .btn {
+        width: 100%;
+        font-size: 0.75rem;
+        padding: 0.25rem 0.5rem;
+    }
+}
+
+/* 태블릿 반응형 */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .table-wrapper {
+        max-height: 65vh;
+    }
+    
+    table th, table td {
+        padding: 10px 15px;
+        min-width: 110px;
     }
 }
 
@@ -306,5 +377,73 @@ textarea.form-control {
 
 .editing {
     background-color: #fff3cd;
+}
+
+/* 테이블 열 간격 개선 */
+table th:not(:first-child), 
+table td:not(:first-child) {
+    padding-left: 25px;
+}
+
+table th:first-child, 
+table td:first-child {
+    padding-left: 20px;
+}
+
+/* 가로 스크롤 인디케이터 */
+.table-wrapper::after {
+    content: '→';
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 24px;
+    color: var(--primary-color);
+    opacity: 0.3;
+    pointer-events: none;
+    z-index: 1;
+}
+
+/* 모바일에서 가로 스크롤 힌트 */
+@media (max-width: 768px) {
+    .table-wrapper::after {
+        display: block;
+    }
+    
+    .table-container::before {
+        content: '← 좌우로 스크롤하세요 →';
+        display: block;
+        text-align: center;
+        padding: 8px;
+        background: #e7f3ff;
+        color: var(--primary-color);
+        font-size: 12px;
+        font-weight: 600;
+        border-radius: 4px 4px 0 0;
+    }
+}
+
+/* 인쇄 스타일 */
+@media print {
+    .table-wrapper {
+        overflow: visible;
+        max-height: none;
+    }
+    
+    .page-header,
+    .filter-box,
+    .action-buttons,
+    button {
+        display: none !important;
+    }
+    
+    table {
+        page-break-inside: auto;
+    }
+    
+    tr {
+        page-break-inside: avoid;
+        page-break-after: auto;
+    }
 }
 

@@ -142,12 +142,18 @@ function showPreview() {
         return;
     }
     
-    const tableHtml = $('#settlementTable').html();
-    $('#previewContent').html('<div class="table-responsive">' + 
-        '<table class="table table-bordered table-hover">' + 
-        '<thead class="table-fixed-header">' + $('#settlementTable thead').html() + '</thead>' +
-        '<tbody>' + $('#settlementTable tbody').html() + '</tbody>' +
-        '</table></div>');
+    let html = '<div class="text-center mb-4">';
+    html += '<img src="{{ url_for("static", filename="images/lpgo.png") }}" alt="위카 로고" style="max-width: 150px; margin-bottom: 10px;">';
+    html += '<p class="mb-0"><strong>위카모빌리티 주식회사</strong></p>';
+    html += '<p class="text-muted">정산내역 (' + startDate + ' ~ ' + endDate + ')</p>';
+    html += '</div>';
+    html += '<div class="table-responsive">';
+    html += '<table class="table table-bordered table-hover">';
+    html += '<thead class="table-fixed-header">' + $('#settlementTable thead').html() + '</thead>';
+    html += '<tbody>' + $('#settlementTable tbody').html() + '</tbody>';
+    html += '</table></div>';
+    
+    $('#previewContent').html(html);
     $('#previewModal').modal('show');
 }
 
