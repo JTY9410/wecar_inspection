@@ -571,16 +571,21 @@ def admin_diagnosis_translate(diagnosis_id: int):
     details = _fetch_request_details(diagnosis_id)
     responses = _fetch_response_details(diagnosis_id)
 
-    # 헤더 정보 번역
+    # 헤더 정보 번역 (sqlite3.Row는 딕셔너리처럼 접근)
     header_translations = {}
-    if diagnosis.get('vehicle_number'):
-        header_translations['vehicle_number'] = translate_to_japanese(f"차량번호: {diagnosis['vehicle_number']}")
-    if diagnosis.get('lot_number'):
-        header_translations['lot_number'] = translate_to_japanese(f"출품번호: {diagnosis['lot_number']}")
-    if diagnosis.get('parking_number'):
-        header_translations['parking_number'] = translate_to_japanese(f"주차번호: {diagnosis['parking_number']}")
-    if diagnosis.get('evaluator_name'):
-        header_translations['evaluator_name'] = translate_to_japanese(f"평가사명: {diagnosis['evaluator_name']}")
+    vehicle_number = diagnosis['vehicle_number'] if diagnosis['vehicle_number'] else None
+    lot_number = diagnosis['lot_number'] if diagnosis['lot_number'] else None
+    parking_number = diagnosis['parking_number'] if diagnosis['parking_number'] else None
+    evaluator_name = diagnosis['evaluator_name'] if diagnosis['evaluator_name'] else None
+    
+    if vehicle_number:
+        header_translations['vehicle_number'] = translate_to_japanese(f"차량번호: {vehicle_number}")
+    if lot_number:
+        header_translations['lot_number'] = translate_to_japanese(f"출품번호: {lot_number}")
+    if parking_number:
+        header_translations['parking_number'] = translate_to_japanese(f"주차번호: {parking_number}")
+    if evaluator_name:
+        header_translations['evaluator_name'] = translate_to_japanese(f"평가사명: {evaluator_name}")
 
     # 표 형식으로 번역 데이터 구성
     translated_table_data = []
@@ -590,8 +595,8 @@ def admin_diagnosis_translate(diagnosis_id: int):
         resp = response_map.get(detail['sequence'])
         # 각 항목 번역
         translated_request = translate_to_japanese(detail['content']) if detail['content'] else ""
-        translated_response = translate_to_japanese(resp['content']) if resp and resp.get('content') else ""
-        translated_note = translate_to_japanese(resp['note']) if resp and resp.get('note') else ""
+        translated_response = translate_to_japanese(resp['content']) if resp and resp['content'] else ""
+        translated_note = translate_to_japanese(resp['note']) if resp and resp['note'] else ""
         
         translated_table_data.append({
             'sequence': detail['sequence'],
@@ -823,8 +828,7 @@ def _aggregate_settlement_rows(year: int, month: int) -> Dict[str, Any]:
         """
         SELECT date(dr.answer_date) AS answer_day,
                COALESCE(evaluator.name, dr.evaluator_name) AS evaluator_name,
-               COUNT(*) AS cnt,
-               SUM(COALESCE(dr.fee, 0)) AS amount
+               COUNT(*) AS cnt
         FROM diagnosis_requests dr
         LEFT JOIN users evaluator ON evaluator.id = dr.evaluator_id
         WHERE dr.answer_date IS NOT NULL
@@ -850,21 +854,24 @@ def _aggregate_settlement_rows(year: int, month: int) -> Dict[str, Any]:
                 "subtotal_count": 0,
                 "subtotal_amount": 0,
             }
-        vat = int(row["amount"] * 0.1) if row["amount"] else 0
-        grand = (row["amount"] or 0) + vat
+        # 금액 = 건수 * 15,000
+        count = row["cnt"]
+        amount = count * 15000
+        vat = int(amount * 0.1)
+        grand = amount + vat
         grouped[day]["rows"].append(
             {
                 "evaluator_name": evaluator_name,
-                "count": row["cnt"],
-                "amount": row["amount"] or 0,
+                "count": count,
+                "amount": amount,
                 "vat": vat,
                 "grand": grand,
             }
         )
-        grouped[day]["subtotal_count"] += row["cnt"]
-        grouped[day]["subtotal_amount"] += row["amount"] or 0
-        total_amount += row["amount"] or 0
-        total_count += row["cnt"]
+        grouped[day]["subtotal_count"] += count
+        grouped[day]["subtotal_amount"] += amount
+        total_amount += amount
+        total_count += count
 
     total_vat = int(total_amount * 0.1)
     payload = {
