@@ -29,3 +29,4 @@ EXPOSE 3010
 CMD python database.py && python app.py
 
 
+

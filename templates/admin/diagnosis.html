@@ -60,19 +60,21 @@
             <tbody>
                 {% for item in diagnoses %}
                 {% set row = item.row %}
-                <tr>
+                <tr id="row-{{ row.id }}">
                     <td>{{ loop.index }}</td>
-                    <td>{{ row.request_date }}</td>
+                    <td><input type="date" class="form-control form-control-sm" name="request_date" value="{{ row.request_date }}" disabled></td>
                     <td>
-                        <span class="badge bg-{% if row.status == '신청' %}secondary{% elif row.status == '답변완료' %}success{% elif row.status == '전송완료' %}info{% else %}warning{% endif %}">
-                            {{ row.status }}
-                        </span>
+                        <select class="form-select form-select-sm" name="status" disabled>
+                            <option value="신청" {% if row.status == '신청' %}selected{% endif %}>신청</option>
+                            <option value="답변완료" {% if row.status == '답변완료' %}selected{% endif %}>답변완료</option>
+                            <option value="전송완료" {% if row.status == '전송완료' %}selected{% endif %}>전송완료</option>
+                        </select>
                     </td>
-                    <td>{{ row.vehicle_number or '' }}</td>
-                    <td>{{ row.lot_number or '' }}</td>
-                    <td>{{ row.parking_number or '' }}</td>
+                    <td><input type="text" class="form-control form-control-sm" name="vehicle_number" value="{{ row.vehicle_number or '' }}" disabled></td>
+                    <td><input type="text" class="form-control form-control-sm" name="lot_number" value="{{ row.lot_number or '' }}" disabled></td>
+                    <td><input type="text" class="form-control form-control-sm" name="parking_number" value="{{ row.parking_number or '' }}" disabled></td>
                     <td class="text-summary">{{ item.request_summary or '' }}</td>
-                    <td>{{ row.answer_date or '' }}</td>
+                    <td><input type="date" class="form-control form-control-sm" name="answer_date" value="{{ row.answer_date or '' }}" disabled></td>
                     <td class="text-summary">{{ item.response_summary or '' }}</td>
                     <td>
                         {% if row.evaluator_name %}
@@ -103,13 +105,17 @@
                         {% endif %}
                     </td>
                     <td>
-                        {% if not row.confirmed_at %}
-                        <button class="btn btn-sm btn-warning confirm-btn" data-id="{{ row.id }}">
-                            <i class="bi bi-check-circle"></i> 확인
-                        </button>
-                        {% else %}
-                        <span class="text-muted small">{{ row.confirmed_at[:10] }}</span>
-                        {% endif %}
+                        <div class="btn-group-sm">
+                            <button class="btn btn-sm btn-outline-primary edit-diagnosis-btn" data-id="{{ row.id }}">
+                                <i class="bi bi-pencil"></i> 수정
+                            </button>
+                            <button class="btn btn-sm btn-success save-diagnosis-btn" data-id="{{ row.id }}" style="display:none;">
+                                <i class="bi bi-check"></i> 저장
+                            </button>
+                            <button class="btn btn-sm btn-danger delete-diagnosis-btn" data-id="{{ row.id }}">
+                                <i class="bi bi-trash"></i> 삭제
+                            </button>
+                        </div>
                     </td>
                 </tr>
                 {% endfor %}
@@ -318,6 +324,80 @@ $(document).ready(function() {
                     } else {
                         alert(response.message);
                     }
+                }
+            });
+        }
+    });
+    
+    // 진단신청 수정 버튼
+    $(document).on('click', '.edit-diagnosis-btn', function() {
+        const id = $(this).data('id');
+        const row = $(`#row-${id}`);
+        row.addClass('editing');
+        row.find('input, select').prop('disabled', false);
+        $(this).hide();
+        row.find('.save-diagnosis-btn').show();
+    });
+    
+    // 진단신청 저장 버튼
+    $(document).on('click', '.save-diagnosis-btn', function() {
+        const id = $(this).data('id');
+        const row = $(`#row-${id}`);
+        
+        const data = {
+            id: id,
+            request_date: row.find('[name="request_date"]').val(),
+            status: row.find('[name="status"]').val(),
+            vehicle_number: row.find('[name="vehicle_number"]').val(),
+            lot_number: row.find('[name="lot_number"]').val(),
+            parking_number: row.find('[name="parking_number"]').val(),
+            answer_date: row.find('[name="answer_date"]').val() || null
+        };
+        
+        $.ajax({
+            url: '/admin/diagnosis/update',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(data),
+            success: function(response) {
+                if (response.success) {
+                    alert('저장되었습니다.');
+                    // 행 비활성화
+                    row.removeClass('editing');
+                    row.find('input, select').prop('disabled', true);
+                    row.find('.edit-diagnosis-btn').show();
+                    row.find('.save-diagnosis-btn').hide();
+                } else {
+                    alert(response.message || '저장에 실패했습니다.');
+                }
+            },
+            error: function(xhr) {
+                const response = xhr.responseJSON;
+                alert(response?.message || '저장 중 오류가 발생했습니다.');
+            }
+        });
+    });
+    
+    // 진단신청 삭제 버튼
+    $(document).on('click', '.delete-diagnosis-btn', function() {
+        const id = $(this).data('id');
+        if (confirm('정말 삭제하시겠습니까? 관련된 모든 데이터가 삭제됩니다.')) {
+            $.ajax({
+                url: '/admin/diagnosis/delete',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({id: id}),
+                success: function(response) {
+                    if (response.success) {
+                        alert('삭제되었습니다.');
+                        location.reload();
+                    } else {
+                        alert(response.message || '삭제에 실패했습니다.');
+                    }
+                },
+                error: function(xhr) {
+                    const response = xhr.responseJSON;
+                    alert(response?.message || '삭제 중 오류가 발생했습니다.');
                 }
             });
         }

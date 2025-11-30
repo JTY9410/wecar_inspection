@@ -729,6 +729,88 @@ def admin_diagnosis_send(diagnosis_id: int):
     return jsonify(success=False, message="이메일 전송에 실패했습니다.")
 
 
+@app.route("/admin/diagnosis/update", methods=["POST"])
+@login_required
+@role_required("관리자")
+def admin_diagnosis_update():
+    data = request.get_json()
+    diagnosis_id = data.get("id")
+    if not diagnosis_id:
+        return jsonify(success=False, message="잘못된 요청입니다.")
+
+    db = get_db()
+    diagnosis = db.execute("SELECT * FROM diagnosis_requests WHERE id = ?", (diagnosis_id,)).fetchone()
+    if not diagnosis:
+        return jsonify(success=False, message="진단신청을 찾을 수 없습니다.")
+
+    request_date = data.get("request_date")
+    status = data.get("status")
+    vehicle_number = data.get("vehicle_number", "").strip()
+    lot_number = data.get("lot_number", "").strip()
+    parking_number = data.get("parking_number", "").strip()
+    answer_date = data.get("answer_date")
+
+    try:
+        update_fields = []
+        params = []
+
+        if request_date:
+            update_fields.append("request_date = ?")
+            params.append(request_date)
+        if status:
+            update_fields.append("status = ?")
+            params.append(status)
+        if vehicle_number is not None:
+            update_fields.append("vehicle_number = ?")
+            params.append(vehicle_number if vehicle_number else None)
+        if lot_number is not None:
+            update_fields.append("lot_number = ?")
+            params.append(lot_number if lot_number else None)
+        if parking_number is not None:
+            update_fields.append("parking_number = ?")
+            params.append(parking_number if parking_number else None)
+        if answer_date is not None:
+            update_fields.append("answer_date = ?")
+            params.append(answer_date if answer_date else None)
+
+        if update_fields:
+            params.append(diagnosis_id)
+            db.execute(
+                f"UPDATE diagnosis_requests SET {', '.join(update_fields)} WHERE id = ?",
+                params,
+            )
+            db.commit()
+
+        return jsonify(success=True)
+    except Exception as e:
+        db.rollback()
+        return jsonify(success=False, message=f"저장 중 오류가 발생했습니다: {str(e)}")
+
+
+@app.route("/admin/diagnosis/delete", methods=["POST"])
+@login_required
+@role_required("관리자")
+def admin_diagnosis_delete():
+    data = request.get_json()
+    diagnosis_id = data.get("id")
+    if not diagnosis_id:
+        return jsonify(success=False, message="잘못된 요청입니다.")
+
+    db = get_db()
+    diagnosis = db.execute("SELECT * FROM diagnosis_requests WHERE id = ?", (diagnosis_id,)).fetchone()
+    if not diagnosis:
+        return jsonify(success=False, message="진단신청을 찾을 수 없습니다.")
+
+    try:
+        # 관련 데이터 삭제 (외래키 제약조건으로 자동 삭제됨)
+        db.execute("DELETE FROM diagnosis_requests WHERE id = ?", (diagnosis_id,))
+        db.commit()
+        return jsonify(success=True)
+    except Exception as e:
+        db.rollback()
+        return jsonify(success=False, message=f"삭제 중 오류가 발생했습니다: {str(e)}")
+
+
 @app.route("/admin/diagnosis/<int:diagnosis_id>/detail/export/<string:fmt>")
 @login_required
 @role_required("관리자")
@@ -848,7 +930,7 @@ def _aggregate_settlement_rows(year: int, month: int) -> Dict[str, Any]:
         FROM diagnosis_requests dr
         LEFT JOIN users evaluator ON evaluator.id = dr.evaluator_id
         WHERE dr.answer_date IS NOT NULL
-          AND dr.status = '답변완료'
+          AND dr.answer_date != ''
           AND date(dr.answer_date) >= date(?)
           AND date(dr.answer_date) < date(?)
         GROUP BY answer_day, evaluator_name
