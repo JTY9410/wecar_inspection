@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}평가답변 - 위카아라이 진단시스템{% endblock %}
+{% block title %}답변내역 - 위카아라이 진단시스템{% endblock %}
 
 {% block content %}
 <div class="container-fluid py-4">
     <div class="page-header">
         <div class="d-flex justify-content-between align-items-center">
-            <h2><i class="bi bi-pencil-square"></i> 평가답변</h2>
+            <h2><i class="bi bi-clock-history"></i> 답변내역</h2>
             <a href="{{ url_for('evaluator_dashboard') }}" class="btn btn-outline-secondary">
                 <i class="bi bi-house"></i> 평가사대시보드페이지로
             </a>
@@ -48,14 +48,17 @@
                     <th>출품번호</th>
                     <th>주차번호</th>
                     <th>진단신청내역</th>
+                    <th>답변일</th>
                     <th>답변</th>
+                    <th>답변수정</th>
+                    <th>평가사</th>
                     <th>작업</th>
                 </tr>
             </thead>
             <tbody>
                 {% for item in requests %}
                 {% set req = item.row %}
-                <tr>
+                <tr data-id="{{ req.id }}">
                     <td>{{ loop.index }}</td>
                     <td>{{ req.request_date }}</td>
                     <td>
@@ -67,11 +70,14 @@
                     <td>{{ req.lot_number or '' }}</td>
                     <td>{{ req.parking_number or '' }}</td>
                     <td class="text-summary">{{ item.request_summary or '' }}</td>
+                    <td>{{ req.answer_date or '' }}</td>
+                    <td class="text-summary">{{ item.response_summary or '' }}</td>
                     <td>
-                        <button class="btn btn-sm btn-primary response-btn" data-id="{{ req.id }}">
-                            <i class="bi bi-pencil"></i> 답변
+                        <button class="btn btn-sm btn-primary edit-response-btn" data-id="{{ req.id }}">
+                            <i class="bi bi-pencil"></i> 수정
                         </button>
                     </td>
+                    <td>{{ req.evaluator_name or '' }}</td>
                     <td>
                         <div class="btn-group-sm">
                             <button class="btn btn-sm btn-outline-primary edit-row-btn" data-id="{{ req.id }}">
@@ -92,21 +98,21 @@
     </div>
 </div>
 
-<!-- 답변 입력 팝업 모달 -->
-<div class="modal fade" id="responseModal" tabindex="-1" data-bs-backdrop="static">
+<!-- 답변수정 팝업 모달 -->
+<div class="modal fade" id="editResponseModal" tabindex="-1" data-bs-backdrop="static">
     <div class="modal-dialog modal-xl">
         <div class="modal-content">
             <div class="modal-header bg-primary text-white">
-                <h5 class="modal-title"><i class="bi bi-pencil-square"></i> 평가답변 입력</h5>
+                <h5 class="modal-title"><i class="bi bi-pencil-square"></i> 답변 수정</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body" id="responseModalBody">
+            <div class="modal-body" id="editResponseModalBody">
                 <!-- 내용이 동적으로 로드됨 -->
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">이전페이지로</button>
-                <button type="button" class="btn btn-success" id="completeResponseBtn">
-                    <i class="bi bi-check-circle"></i> 답변완료
+                <button type="button" class="btn btn-success" id="saveResponseBtn">
+                    <i class="bi bi-save"></i> 저장
                 </button>
             </div>
         </div>
@@ -120,11 +126,11 @@ $(document).ready(function() {
     setDefaultDateRange(7);
     let currentDiagnosisId = null;
     
-    // 답변 버튼 클릭
-    $('.response-btn').on('click', function() {
+    // 답변수정 버튼 클릭
+    $('.edit-response-btn').on('click', function() {
         currentDiagnosisId = $(this).data('id');
-        $('#responseModalBody').html('<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">로딩 중...</span></div></div>');
-        $('#responseModal').modal('show');
+        $('#editResponseModalBody').html('<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">로딩 중...</span></div></div>');
+        $('#editResponseModal').modal('show');
         
         // 답변 폼 로드 (JSON API 사용)
         $.ajax({
@@ -132,33 +138,32 @@ $(document).ready(function() {
             method: 'GET',
             success: function(response) {
                 if (!response.success) {
-                    $('#responseModalBody').html('<div class="alert alert-danger">' + (response.message || '답변 폼을 불러올 수 없습니다.') + '</div>');
+                    $('#editResponseModalBody').html('<div class="alert alert-danger">' + (response.message || '답변 폼을 불러올 수 없습니다.') + '</div>');
                     return;
                 }
                 
                 const diag = response.diagnosis;
                 let tableRows = '';
                 response.table_data.forEach(function(row) {
-                    const hasResponse = row.response_content && row.response_content.trim() !== '';
                     tableRows += `
                         <tr data-seq="${row.sequence}">
                             <td>${row.sequence}</td>
                             <td>${row.request_content || ''}</td>
                             <td>
-                                <textarea class="form-control response-content" name="content_${row.sequence}" rows="3" placeholder="답변을 입력하세요" ${hasResponse ? 'disabled' : ''}>${row.response_content || ''}</textarea>
+                                <textarea class="form-control response-content" name="content_${row.sequence}" rows="3" placeholder="답변을 입력하세요">${row.response_content || ''}</textarea>
                             </td>
                             <td>
-                                <textarea class="form-control response-note" name="note_${row.sequence}" rows="2" placeholder="비고를 입력하세요" ${hasResponse ? 'disabled' : ''}>${row.note || ''}</textarea>
+                                <textarea class="form-control response-note" name="note_${row.sequence}" rows="2" placeholder="비고를 입력하세요">${row.note || ''}</textarea>
                             </td>
                             <td>
                                 <div class="btn-group-sm">
-                                    <button type="button" class="btn btn-sm btn-outline-primary edit-response-btn" data-seq="${row.sequence}">
+                                    <button type="button" class="btn btn-sm btn-outline-primary edit-item-btn" data-seq="${row.sequence}">
                                         <i class="bi bi-pencil"></i> 수정
                                     </button>
-                                    <button type="button" class="btn btn-sm btn-success save-response-btn" data-seq="${row.sequence}" style="display:none;">
+                                    <button type="button" class="btn btn-sm btn-success save-item-btn" data-seq="${row.sequence}" style="display:none;">
                                         <i class="bi bi-check"></i> 저장
                                     </button>
-                                    <button type="button" class="btn btn-sm btn-danger delete-response-btn" data-seq="${row.sequence}">
+                                    <button type="button" class="btn btn-sm btn-danger delete-item-btn" data-seq="${row.sequence}">
                                         <i class="bi bi-trash"></i> 삭제
                                     </button>
                                 </div>
@@ -181,7 +186,7 @@ $(document).ready(function() {
                             </div>
                         </div>
                     </div>
-                    <form id="responseForm">
+                    <form id="editResponseForm">
                         <input type="hidden" name="diagnosis_id" value="${currentDiagnosisId}">
                         <div class="table-wrapper">
                             <table class="table table-bordered">
@@ -202,48 +207,47 @@ $(document).ready(function() {
                     </form>
                 `;
                 
-                $('#responseModalBody').html(modalContent);
+                $('#editResponseModalBody').html(modalContent);
                 
-                // 초기 상태 설정: 답변이 없으면 입력 가능, 있으면 비활성화
+                // 초기 상태 설정
                 $('tbody tr').each(function() {
                     const content = $(this).find('.response-content').val().trim();
                     if (content) {
                         $(this).find('.response-content, .response-note').prop('disabled', true);
-                        $(this).find('.edit-response-btn').show();
-                        $(this).find('.save-response-btn').hide();
+                        $(this).find('.edit-item-btn').show();
+                        $(this).find('.save-item-btn').hide();
                     } else {
-                        // 답변이 없으면 입력 가능하게 활성화
                         $(this).find('.response-content, .response-note').prop('disabled', false);
-                        $(this).find('.edit-response-btn').show();
-                        $(this).find('.save-response-btn').hide();
+                        $(this).find('.edit-item-btn').show();
+                        $(this).find('.save-item-btn').hide();
                     }
                 });
                 
                 // 수정/저장/삭제 버튼 이벤트 바인딩
-                bindResponseFormEvents();
+                bindEditResponseFormEvents();
             },
             error: function(xhr, status, error) {
                 console.error('Error loading response form:', error);
-                $('#responseModalBody').html('<div class="alert alert-danger">답변 폼을 불러올 수 없습니다. 오류: ' + error + '</div>');
+                $('#editResponseModalBody').html('<div class="alert alert-danger">답변 폼을 불러올 수 없습니다. 오류: ' + error + '</div>');
             }
         });
     });
     
-    // 답변 폼 이벤트 바인딩
-    function bindResponseFormEvents() {
-        // 수정 버튼
-        $(document).off('click', '.edit-response-btn').on('click', '.edit-response-btn', function() {
+    // 답변 수정 폼 이벤트 바인딩
+    function bindEditResponseFormEvents() {
+        // 수정 버튼 (개별 항목)
+        $(document).off('click', '.edit-item-btn').on('click', '.edit-item-btn', function() {
             const seq = $(this).data('seq');
             const row = $(this).closest('tr');
             const textarea = row.find('.response-content, .response-note');
             
             textarea.prop('disabled', false);
             $(this).hide();
-            row.find('.save-response-btn').show();
+            row.find('.save-item-btn').show();
         });
         
-        // 저장 버튼 (개별 행)
-        $(document).off('click', '.save-response-btn').on('click', '.save-response-btn', function() {
+        // 저장 버튼 (개별 항목)
+        $(document).off('click', '.save-item-btn').on('click', '.save-item-btn', function() {
             const seq = $(this).data('seq');
             const row = $(this).closest('tr');
             const content = row.find('.response-content').val().trim();
@@ -263,26 +267,34 @@ $(document).ready(function() {
                 }]
             };
             
+            const saveBtn = $(this);
+            saveBtn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm"></span> 저장 중...');
+            
             $.ajax({
                 url: '{{ url_for("evaluator_response_save") }}',
                 method: 'POST',
                 contentType: 'application/json',
                 data: JSON.stringify(data),
                 success: function(response) {
+                    saveBtn.prop('disabled', false).html('<i class="bi bi-check"></i> 저장');
                     if (response.success) {
                         alert('저장되었습니다.');
                         row.find('.response-content, .response-note').prop('disabled', true);
-                        $(this).hide();
-                        row.find('.edit-response-btn').show();
+                        saveBtn.hide();
+                        row.find('.edit-item-btn').show();
                     } else {
                         alert(response.message);
                     }
-                }.bind(this)
+                },
+                error: function() {
+                    saveBtn.prop('disabled', false).html('<i class="bi bi-check"></i> 저장');
+                    alert('저장 중 오류가 발생했습니다.');
+                }
             });
         });
         
-        // 삭제 버튼
-        $(document).off('click', '.delete-response-btn').on('click', '.delete-response-btn', function() {
+        // 삭제 버튼 (개별 항목)
+        $(document).off('click', '.delete-item-btn').on('click', '.delete-item-btn', function() {
             const seq = $(this).data('seq');
             const row = $(this).closest('tr');
             
@@ -290,19 +302,19 @@ $(document).ready(function() {
                 row.find('.response-content').val('');
                 row.find('.response-note').val('');
                 row.find('.response-content, .response-note').prop('disabled', false);
-                row.find('.save-response-btn').hide();
-                row.find('.edit-response-btn').show();
+                row.find('.save-item-btn').hide();
+                row.find('.edit-item-btn').show();
             }
         });
     }
     
-    // 답변완료 버튼
-    $('#completeResponseBtn').on('click', function() {
+    // 저장 버튼 (전체)
+    $('#saveResponseBtn').on('click', function() {
         if (!currentDiagnosisId) return;
         
         const details = [];
-        $('#responseForm tbody tr').each(function() {
-            const seq = $(this).find('td:first').text();
+        $('#editResponseForm tbody tr').each(function() {
+            const seq = $(this).data('seq');
             const content = $(this).find('.response-content').val().trim();
             const note = $(this).find('.response-note').val().trim();
             if (content) {
@@ -319,7 +331,9 @@ $(document).ready(function() {
             return;
         }
         
-        // 먼저 저장
+        const saveBtn = $(this);
+        saveBtn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm"></span> 저장 중...');
+        
         $.ajax({
             url: '{{ url_for("evaluator_response_save") }}',
             method: 'POST',
@@ -329,24 +343,18 @@ $(document).ready(function() {
                 details: details
             }),
             success: function(response) {
+                saveBtn.prop('disabled', false).html('<i class="bi bi-save"></i> 저장');
                 if (response.success) {
-                    // 답변완료 처리
-                    $.ajax({
-                        url: '{{ url_for("evaluator_response_confirm") }}',
-                        method: 'POST',
-                        contentType: 'application/json',
-                        data: JSON.stringify({diagnosis_id: currentDiagnosisId}),
-                        success: function(response) {
-                            if (response.success) {
-                                alert('답변이 완료되었습니다.');
-                                $('#responseModal').modal('hide');
-                                location.reload();
-                            }
-                        }
-                    });
+                    alert('저장되었습니다.');
+                    $('#editResponseModal').modal('hide');
+                    location.reload();
                 } else {
                     alert(response.message);
                 }
+            },
+            error: function() {
+                saveBtn.prop('disabled', false).html('<i class="bi bi-save"></i> 저장');
+                alert('저장 중 오류가 발생했습니다.');
             }
         });
     });
@@ -354,7 +362,7 @@ $(document).ready(function() {
     // 작업열 수정/저장/삭제 버튼
     $('.edit-row-btn').on('click', function() {
         const id = $(this).data('id');
-        const row = $(`tr:has([data-id="${id}"])`);
+        const row = $(`tr[data-id="${id}"]`);
         // 행 전체를 수정 가능하게 만들기 (필요시 구현)
         alert('행 수정 기능은 구현 예정입니다.');
     });
@@ -373,4 +381,5 @@ $(document).ready(function() {
 });
 </script>
 {% endblock %}
+
 

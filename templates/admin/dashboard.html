@@ -1,48 +1,57 @@
 {% extends "base.html" %}
 
-{% block title %}관리자 대시보드 - 위카아라이 검수시스템{% endblock %}
+{% block title %}관리자 대시보드 - 위카아라이 진단시스템{% endblock %}
 
 {% block content %}
 <div class="container-fluid py-4">
-    <div class="page-header">
-        <h2><i class="bi bi-speedometer2"></i> 관리자 대시보드</h2>
-        <p class="text-muted mb-0">안녕하세요, {{ session.name }}님</p>
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="fw-bold">
+            <i class="bi bi-speedometer2"></i> 관리자 대시보드
+        </h2>
+        <a href="{{ url_for('logout') }}" class="btn btn-outline-danger">
+            <i class="bi bi-box-arrow-right"></i> 로그아웃
+        </a>
     </div>
     
-    <div class="row">
-        <div class="col-md-4 mb-4">
-            <div class="dashboard-card text-center">
-                <i class="bi bi-people fs-1 text-primary mb-3"></i>
-                <h3>회원관리</h3>
-                <p class="text-muted">회원 정보를 관리하고 승인합니다.</p>
-                <a href="{{ url_for('admin_users') }}" class="btn btn-primary">이동하기</a>
+    <div class="row g-4">
+        <div class="col-12 col-md-4">
+            <div class="card h-100 shadow-sm hover-card">
+                <div class="card-body text-center">
+                    <i class="bi bi-people fs-1 text-primary mb-3"></i>
+                    <h4 class="card-title">회원관리</h4>
+                    <p class="card-text text-muted">회원 정보 조회 및 관리</p>
+                    <a href="{{ url_for('admin_users') }}" class="btn btn-primary btn-lg w-100">
+                        <i class="bi bi-arrow-right-circle"></i> 이동하기
+                    </a>
+                </div>
             </div>
         </div>
-        <div class="col-md-4 mb-4">
-            <div class="dashboard-card text-center">
-                <i class="bi bi-clipboard-check fs-1 text-primary mb-3"></i>
-                <h3>검수신청관리</h3>
-                <p class="text-muted">검수신청을 확인하고 관리합니다.</p>
-                <a href="{{ url_for('admin_inspections') }}" class="btn btn-primary">이동하기</a>
+        <div class="col-12 col-md-4">
+            <div class="card h-100 shadow-sm hover-card">
+                <div class="card-body text-center">
+                    <i class="bi bi-clipboard-check fs-1 text-success mb-3"></i>
+                    <h4 class="card-title">진단신청관리</h4>
+                    <p class="card-text text-muted">진단 신청 내역 관리</p>
+                    <a href="{{ url_for('admin_diagnosis') }}" class="btn btn-success btn-lg w-100">
+                        <i class="bi bi-arrow-right-circle"></i> 이동하기
+                    </a>
+                </div>
             </div>
         </div>
-        <div class="col-md-4 mb-4">
-            <div class="dashboard-card text-center">
-                <i class="bi bi-calculator fs-1 text-primary mb-3"></i>
-                <h3>정산관리</h3>
-                <p class="text-muted">평가사 정산을 관리합니다.</p>
-                <a href="{{ url_for('admin_settlements') }}" class="btn btn-primary">이동하기</a>
+        <div class="col-12 col-md-4">
+            <div class="card h-100 shadow-sm hover-card">
+                <div class="card-body text-center">
+                    <i class="bi bi-calculator fs-1 text-info mb-3"></i>
+                    <h4 class="card-title">정산관리</h4>
+                    <p class="card-text text-muted">정산 내역 조회 및 관리</p>
+                    <a href="{{ url_for('admin_settlements') }}" class="btn btn-info btn-lg w-100">
+                        <i class="bi bi-arrow-right-circle"></i> 이동하기
+                    </a>
+                </div>
             </div>
         </div>
-    </div>
-    
-    <div class="text-center mt-4">
-        <a href="{{ url_for('logout') }}" class="btn btn-outline-secondary">로그아웃</a>
     </div>
 </div>
 {% endblock %}
-
-
-
 
 

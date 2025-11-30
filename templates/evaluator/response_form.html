@@ -1,113 +1,100 @@
 {% extends "base.html" %}
 
-{% block title %}평가답변 입력 - 위카아라이 검수시스템{% endblock %}
+{% block title %}평가답변 입력 - 위카아라이 진단시스템{% endblock %}
 
 {% block content %}
 <div class="container-fluid py-4">
     <div class="page-header">
-        <button onclick="window.close()" class="btn btn-outline-secondary mb-3">
-            <i class="bi bi-arrow-left"></i> 이전페이지로
-        </button>
-        <h2><i class="bi bi-chat-dots"></i> 평가답변 입력</h2>
+        <div class="d-flex justify-content-between align-items-center">
+            <h2><i class="bi bi-pencil-square"></i> 평가답변 입력</h2>
+            <button onclick="window.close()" class="btn btn-outline-secondary">
+                <i class="bi bi-x-circle"></i> 이전페이지로
+            </button>
+        </div>
     </div>
     
-    <div class="table-container">
-        <table class="table table-bordered mb-4">
-            <tr>
-                <th width="150">신청일</th>
-                <td>{{ request_info.request_date[:19] if request_info.request_date else '' }}</td>
-                <th width="150">차량번호</th>
-                <td>{{ request_info.vehicle_number or '' }}</td>
-            </tr>
-            <tr>
-                <th>출품번호</th>
-                <td>{{ request_info.lot_number or '' }}</td>
-                <th>주차번호</th>
-                <td>{{ request_info.parking_number or '' }}</td>
-            </tr>
-        </table>
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3"><strong>신청일:</strong> {{ diagnosis.request_date }}</div>
+                <div class="col-md-3"><strong>차량번호:</strong> {{ diagnosis.vehicle_number or '' }}</div>
+                <div class="col-md-3"><strong>출품번호:</strong> {{ diagnosis.lot_number or '' }}</div>
+                <div class="col-md-3"><strong>주차번호:</strong> {{ diagnosis.parking_number or '' }}</div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-3"><strong>평가사명:</strong> {{ diagnosis.evaluator_name or '' }}</div>
+            </div>
+        </div>
     </div>
     
-    <div class="table-container">
-        <h4 class="mb-3">답변 입력</h4>
-        <form id="responseForm">
-            <input type="hidden" name="request_id" value="{{ request_info.id }}">
-            <div class="table-responsive">
-                <table class="table table-bordered" id="responseTable">
-                    <thead>
-                        <tr>
-                            <th width="80">순</th>
-                            <th>질문내역</th>
-                            <th>답변입력</th>
-                            <th>비고</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for detail in inspection_details %}
-                        <tr>
-                            <td>{{ detail.sequence }}</td>
-                            <td>{{ detail.content }}</td>
-                            <td>
-                                {% set found = false %}
-                                {% for resp_detail in response_details %}
-                                    {% if resp_detail.sequence == detail.sequence %}
-                                        <textarea class="form-control response-input" name="response_{{ detail.sequence }}" rows="3" disabled>{{ resp_detail.content }}</textarea>
-                                        {% set found = true %}
-                                    {% endif %}
-                                {% endfor %}
-                                {% if not found %}
-                                <textarea class="form-control response-input" name="response_{{ detail.sequence }}" rows="3" disabled></textarea>
-                                {% endif %}
-                            </td>
-                            <td>
-                                {% set found = false %}
-                                {% for resp_detail in response_details %}
-                                    {% if resp_detail.sequence == detail.sequence %}
-                                        <input type="text" class="form-control note-input" name="note_{{ detail.sequence }}" value="{{ resp_detail.note or '' }}" disabled>
-                                        {% set found = true %}
-                                    {% endif %}
-                                {% endfor %}
-                                {% if not found %}
-                                <input type="text" class="form-control note-input" name="note_{{ detail.sequence }}" disabled>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            
-            <div class="text-center mt-4">
-                <button type="button" class="btn btn-info" onclick="previewResponse()">
-                    <i class="bi bi-eye"></i> 입력내역 확인
-                </button>
-                <button type="button" class="btn btn-warning" id="editBtn" onclick="enableEdit()">
-                    <i class="bi bi-pencil"></i> 수정
-                </button>
-                <button type="button" class="btn btn-success" id="saveBtn" onclick="saveResponse()" style="display:none;">
-                    <i class="bi bi-check"></i> 저장
-                </button>
-            </div>
-        </form>
-    </div>
+    <form id="responseForm">
+        <input type="hidden" name="diagnosis_id" value="{{ diagnosis.id }}">
+        <div class="table-wrapper">
+            <table class="table table-bordered">
+                <thead class="table-fixed-header">
+                    <tr>
+                        <th style="width: 80px;">순</th>
+                        <th>진단신청내역</th>
+                        <th>답변</th>
+                        <th>비고</th>
+                        <th style="width: 150px;">작업</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for detail in request_details %}
+                    {% set resp = response_details|selectattr('sequence', 'equalto', detail.sequence)|first %}
+                    <tr data-seq="{{ detail.sequence }}">
+                        <td>{{ detail.sequence }}</td>
+                        <td>{{ detail.content }}</td>
+                        <td>
+                            <textarea class="form-control response-content" name="content_{{ detail.sequence }}" rows="3" placeholder="답변을 입력하세요">{{ resp.content if resp else '' }}</textarea>
+                        </td>
+                        <td>
+                            <textarea class="form-control response-note" name="note_{{ detail.sequence }}" rows="2" placeholder="비고를 입력하세요">{{ resp.note if resp else '' }}</textarea>
+                        </td>
+                        <td>
+                            <div class="btn-group-sm">
+                                <button type="button" class="btn btn-sm btn-outline-primary edit-response-btn" data-seq="{{ detail.sequence }}">
+                                    <i class="bi bi-pencil"></i> 수정
+                                </button>
+                                <button type="button" class="btn btn-sm btn-success save-response-btn" data-seq="{{ detail.sequence }}" style="display:none;">
+                                    <i class="bi bi-check"></i> 저장
+                                </button>
+                                <button type="button" class="btn btn-sm btn-danger delete-response-btn" data-seq="{{ detail.sequence }}">
+                                    <i class="bi bi-trash"></i> 삭제
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="text-center mt-4">
+            <button type="button" class="btn btn-info btn-lg me-2" id="previewBtn">
+                <i class="bi bi-eye"></i> 미리보기
+            </button>
+            <button type="button" class="btn btn-success btn-lg" id="saveBtn">
+                <i class="bi bi-save"></i> 저장
+            </button>
+        </div>
+    </form>
 </div>
 
-<!-- 입력내역 확인 모달 -->
+<!-- 미리보기 모달 -->
 <div class="modal fade" id="previewModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">입력내역 확인</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title">답변 미리보기</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body" id="previewContent">
                 <!-- 미리보기 내용 -->
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" onclick="window.close()">
-                    <i class="bi bi-arrow-left"></i> 이전페이지로
-                </button>
-                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">닫기</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
             </div>
         </div>
     </div>
@@ -116,95 +103,156 @@
 
 {% block extra_js %}
 <script>
-function enableEdit() {
-    $('.response-input, .note-input').prop('disabled', false);
-    $('#editBtn').hide();
-    $('#saveBtn').show();
-    $('#responseTable').addClass('editing');
-}
-
-function previewResponse() {
-    let html = '<div class="table-responsive">';
-    html += '<table class="table table-bordered">';
-    html += '<thead><tr><th width="80">순</th><th>질문내역</th><th>답변내역</th><th>비고</th></tr></thead><tbody>';
-    
-    $('#responseTable tbody tr').each(function() {
-        const seq = $(this).find('td:first').text();
-        const question = $(this).find('td:eq(1)').text();
-        const answer = $(this).find('.response-input').val();
-        const note = $(this).find('.note-input').val();
-        
-        if (answer || note) {
-            html += '<tr>';
-            html += '<td>' + seq + '</td>';
-            html += '<td>' + question + '</td>';
-            html += '<td>' + (answer ? answer.replace(/\n/g, '<br>') : '') + '</td>';
-            html += '<td>' + (note || '') + '</td>';
-            html += '</tr>';
+$(document).ready(function() {
+    // 초기 상태: 답변이 있으면 비활성화, 없으면 활성화
+    $('tbody tr').each(function() {
+        const content = $(this).find('.response-content').val().trim();
+        if (content) {
+            $(this).find('.response-content, .response-note').prop('disabled', true);
+            $(this).find('.edit-response-btn').show();
+            $(this).find('.save-response-btn').hide();
+        } else {
+            $(this).find('.response-content, .response-note').prop('disabled', false);
+            $(this).find('.edit-response-btn').show();
+            $(this).find('.save-response-btn').hide();
         }
     });
     
-    html += '</tbody></table></div>';
-    $('#previewContent').html(html);
-    $('#previewModal').modal('show');
-}
-
-function saveResponse() {
-    const requestId = $('[name="request_id"]').val();
-    const details = [];
+    // 수정 버튼
+    $('.edit-response-btn').on('click', function() {
+        const seq = $(this).data('seq');
+        const row = $(this).closest('tr');
+        row.find('.response-content, .response-note').prop('disabled', false).focus();
+        $(this).hide();
+        row.find('.save-response-btn').show();
+    });
     
-    $('#responseTable tbody tr').each(function() {
-        const seq = $(this).find('td:first').text();
-        const content = $(this).find('.response-input').val().trim();
-        const note = $(this).find('.note-input').val().trim();
+    // 저장 버튼 (개별 행)
+    $('.save-response-btn').on('click', function() {
+        const seq = $(this).data('seq');
+        const row = $(this).closest('tr');
+        const content = row.find('.response-content').val().trim();
+        const note = row.find('.response-note').val().trim();
         
-        if (content) {
-            details.push({
+        if (!content) {
+            alert('답변을 입력해주세요.');
+            return;
+        }
+        
+        const data = {
+            diagnosis_id: {{ diagnosis.id }},
+            details: [{
                 sequence: parseInt(seq),
                 content: content,
-                note: note || ''
-            });
-        }
-    });
-    
-    if (details.length === 0) {
-        alert('답변을 최소 1개 이상 입력해주세요.');
-        return;
-    }
-    
-    const saveBtn = $('#saveBtn');
-    const originalText = saveBtn.html();
-    saveBtn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm"></span> 저장 중...');
-    
-    $.ajax({
-        url: '{{ url_for("evaluator_response_save") }}',
-        method: 'POST',
-        contentType: 'application/json',
-        data: JSON.stringify({
-            request_id: requestId,
-            details: details
-        }),
-        success: function(response) {
-            saveBtn.prop('disabled', false).html(originalText);
-            if (response.success) {
-                alert(response.message);
-                $('.response-input, .note-input').prop('disabled', true);
-                $('#editBtn').show();
-                $('#saveBtn').hide();
-                $('#responseTable').removeClass('editing');
-                if (window.opener) {
-                    window.opener.location.reload();
+                note: note
+            }]
+        };
+        
+        const saveBtn = $(this);
+        saveBtn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm"></span> 저장 중...');
+        
+        $.ajax({
+            url: '{{ url_for("evaluator_response_save") }}',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(data),
+            success: function(response) {
+                saveBtn.prop('disabled', false).html('<i class="bi bi-check"></i> 저장');
+                if (response.success) {
+                    alert('저장되었습니다.');
+                    row.find('.response-content, .response-note').prop('disabled', true);
+                    saveBtn.hide();
+                    row.find('.edit-response-btn').show();
+                } else {
+                    alert(response.message);
                 }
-            } else {
-                alert(response.message || '저장 중 오류가 발생했습니다.');
+            },
+            error: function() {
+                saveBtn.prop('disabled', false).html('<i class="bi bi-check"></i> 저장');
+                alert('저장 중 오류가 발생했습니다.');
             }
-        },
-        error: function() {
-            saveBtn.prop('disabled', false).html(originalText);
-            alert('저장 중 오류가 발생했습니다.');
+        });
+    });
+    
+    // 삭제 버튼
+    $('.delete-response-btn').on('click', function() {
+        const seq = $(this).data('seq');
+        const row = $(this).closest('tr');
+        
+        if (confirm('정말 삭제하시겠습니까?')) {
+            row.find('.response-content').val('');
+            row.find('.response-note').val('');
+            row.find('.response-content, .response-note').prop('disabled', false);
+            row.find('.save-response-btn').hide();
+            row.find('.edit-response-btn').show();
         }
     });
-}
+    
+    // 전체 저장 버튼
+    $('#saveBtn').on('click', function() {
+        const details = [];
+        $('tbody tr').each(function() {
+            const seq = $(this).data('seq');
+            const content = $(this).find('.response-content').val().trim();
+            const note = $(this).find('.response-note').val().trim();
+            if (content) {
+                details.push({
+                    sequence: parseInt(seq),
+                    content: content,
+                    note: note
+                });
+            }
+        });
+        
+        if (details.length === 0) {
+            alert('답변을 입력해주세요.');
+            return;
+        }
+        
+        const data = {
+            diagnosis_id: {{ diagnosis.id }},
+            details: details
+        };
+        
+        const saveBtn = $(this);
+        saveBtn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm"></span> 저장 중...');
+        
+        $.ajax({
+            url: '{{ url_for("evaluator_response_save") }}',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(data),
+            success: function(response) {
+                saveBtn.prop('disabled', false).html('<i class="bi bi-save"></i> 저장');
+                if (response.success) {
+                    alert('저장되었습니다.');
+                    location.reload();
+                } else {
+                    alert(response.message);
+                }
+            },
+            error: function() {
+                saveBtn.prop('disabled', false).html('<i class="bi bi-save"></i> 저장');
+                alert('저장 중 오류가 발생했습니다.');
+            }
+        });
+    });
+    
+    // 미리보기
+    $('#previewBtn').on('click', function() {
+        let html = '<div class="table-wrapper"><table class="table table-bordered"><thead><tr><th>순</th><th>진단신청내역</th><th>답변</th><th>비고</th></tr></thead><tbody>';
+        $('tbody tr').each(function() {
+            const seq = $(this).data('seq');
+            const request = $(this).find('td:nth-child(2)').text();
+            const content = $(this).find('.response-content').val();
+            const note = $(this).find('.response-note').val();
+            html += '<tr><td>' + seq + '</td><td>' + request + '</td><td>' + content + '</td><td>' + note + '</td></tr>';
+        });
+        html += '</tbody></table></div>';
+        $('#previewContent').html(html);
+        $('#previewModal').modal('show');
+    });
+});
 </script>
 {% endblock %}
 

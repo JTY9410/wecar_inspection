@@ -1,60 +1,43 @@
 #!/bin/bash
-# 파일 변경 감지 및 자동 배포 스크립트 (향상된 버전)
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+REGISTRY="wecarmobility"
+IMAGE_NAME="wecar-diagnosis"
+TAG="latest"
+FULL_IMAGE="${REGISTRY}/${IMAGE_NAME}:${TAG}"
 
-echo "=========================================="
-echo "위카아라이 검수시스템 자동 배포 모니터링"
-echo "포트: 2000"
-echo "파일 변경 시 자동으로 Docker에 업로드됩니다."
-echo "종료하려면 Ctrl+C를 누르세요."
-echo "=========================================="
+echo "=== 위카아라이 진단시스템 Docker 자동 배포 ==="
 
-# 초기 배포
-echo "초기 배포 실행 중..."
-./deploy.sh
+# Docker 빌드
+echo "1. Docker 이미지 빌드 중..."
+docker build -t ${FULL_IMAGE} .
 
-# 파일 변경 감지 및 자동 배포
-if command -v fswatch &> /dev/null; then
-    # macOS용 fswatch
-    echo "파일 변경 감지 시작 (fswatch 사용)..."
-    fswatch -o . --exclude='(__pycache__|\.pyc|\.db|\.xlsx|\.pdf|\.git|data/)' | while read f; do
-        echo ""
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] 파일 변경 감지됨. 자동 배포 시작..."
-        ./deploy.sh
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] 자동 배포 완료. 계속 모니터링 중..."
-    done
-elif command -v inotifywait &> /dev/null; then
-    # Linux용 inotifywait
-    echo "파일 변경 감지 시작 (inotifywait 사용)..."
-    while true; do
-        inotifywait -r -e modify,create,delete,move \
-            --exclude '(__pycache__|\.pyc|\.db|\.xlsx|\.pdf|\.git|data/)' \
-            . 2>/dev/null || true
-        
-        echo ""
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] 파일 변경 감지됨. 자동 배포 시작..."
-        ./deploy.sh
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] 자동 배포 완료. 계속 모니터링 중..."
-    done
-else
-    echo "경고: 파일 변경 감지 도구가 설치되어 있지 않습니다."
-    echo ""
-    echo "자동 배포를 사용하려면 다음 중 하나를 설치하세요:"
-    echo "  - Linux: sudo apt-get install inotify-tools"
-    echo "  - macOS: brew install fswatch"
-    echo ""
-    echo "수동 배포를 계속 사용할 수 있습니다: ./deploy.sh"
-    echo ""
-    echo "현재 상태:"
-    docker-compose ps
-    exit 1
+# Docker 레지스트리 로그인 확인
+echo "2. Docker 레지스트리 로그인 확인 중..."
+if ! docker info | grep -q "Username"; then
+    echo "Docker 레지스트리에 로그인해주세요:"
+    docker login
 fi
 
+# 이미지 푸시
+echo "3. Docker 이미지 푸시 중..."
+docker push ${FULL_IMAGE}
 
+# 기존 컨테이너 중지 및 제거
+echo "4. 기존 컨테이너 중지 및 제거 중..."
+docker-compose down || true
 
+# 최신 이미지 풀
+echo "5. 최신 이미지 풀 중..."
+docker pull ${FULL_IMAGE}
+
+# 컨테이너 시작
+echo "6. 컨테이너 시작 중..."
+docker-compose up -d
+
+echo "=== 배포 완료 ==="
+echo "애플리케이션은 http://localhost:3010 에서 실행됩니다."
+echo "로그 확인: docker-compose logs -f"
 
 

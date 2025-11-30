@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}진단신청 상세 - 위카아라이 진단시스템{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="page-header">
+        <div class="d-flex justify-content-between align-items-center">
+            <h2><i class="bi bi-clipboard-data"></i> 진단신청 상세</h2>
+            <button onclick="window.close()" class="btn btn-outline-secondary">
+                <i class="bi bi-x-circle"></i> 이전페이지로
+            </button>
+        </div>
+    </div>
+    
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3"><strong>신청일:</strong> {{ diagnosis.request_date }}</div>
+                <div class="col-md-3"><strong>차량번호:</strong> {{ diagnosis.vehicle_number or '' }}</div>
+                <div class="col-md-3"><strong>출품번호:</strong> {{ diagnosis.lot_number or '' }}</div>
+                <div class="col-md-3"><strong>주차번호:</strong> {{ diagnosis.parking_number or '' }}</div>
+            </div>
+            <div class="row mt-2">
+                <div class="col-md-3"><strong>평가사명:</strong> {{ diagnosis.evaluator_name or '' }}</div>
+                <div class="col-md-3"><strong>상태:</strong> {{ diagnosis.status }}</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="table-wrapper">
+        <table class="table table-bordered">
+            <thead class="table-fixed-header">
+                <tr>
+                    <th>순</th>
+                    <th>진단신청내역</th>
+                    <th>답변내역</th>
+                    <th>비고</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for detail in request_details %}
+                {% set resp = response_details|selectattr('sequence', 'equalto', detail.sequence)|first %}
+                <tr>
+                    <td>{{ detail.sequence }}</td>
+                    <td>{{ detail.content }}</td>
+                    <td>{{ resp.content if resp else '' }}</td>
+                    <td>{{ resp.note if resp else '' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    
+    <div class="text-center mt-4 mb-4">
+        <img src="{{ url_for('static', filename='images/lpgo.png') }}" alt="위카 로고" style="max-width: 150px;">
+        <p class="mt-2"><strong>위카모빌리티 주식회사</strong></p>
+    </div>
+    
+    <div class="text-center">
+        {% if not diagnosis.confirmed_at %}
+        <button type="button" class="btn btn-primary" id="confirmCompleteBtn">
+            <i class="bi bi-check-circle"></i> 확인완료
+        </button>
+        {% endif %}
+        <a href="{{ url_for('admin_diagnosis_translate', diagnosis_id=diagnosis.id) }}" class="btn btn-info">
+            <i class="bi bi-translate"></i> 번역
+        </a>
+        <a href="{{ url_for('admin_diagnosis_detail_export', diagnosis_id=diagnosis.id, fmt='xlsx') }}" class="btn btn-success">
+            <i class="bi bi-file-earmark-excel"></i> 엑셀저장
+        </a>
+        <a href="{{ url_for('admin_diagnosis_detail_export', diagnosis_id=diagnosis.id, fmt='pdf') }}" class="btn btn-danger">
+            <i class="bi bi-file-earmark-pdf"></i> PDF저장
+        </a>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+$(document).ready(function() {
+    $('#confirmCompleteBtn').on('click', function() {
+        if (confirm('확인 완료 처리하시겠습니까?')) {
+            $.ajax({
+                url: '/admin/diagnosis/{{ diagnosis.id }}/confirm',
+                method: 'POST',
+                success: function(response) {
+                    if (response.success) {
+                        alert('확인 완료되었습니다.');
+                        location.reload();
+                    }
+                }
+            });
+        }
+    });
+});
+</script>
+{% endblock %}
+

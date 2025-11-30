@@ -4,8 +4,6 @@ openpyxl==3.1.2
 reportlab==4.0.7
 googletrans==4.0.0rc1
 Pillow==10.1.0
-
-
-
+requests==2.31.0
 
 

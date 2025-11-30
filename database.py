@@ -1,168 +1,197 @@
 """
-데이터베이스 초기화 및 모델 정의
+SQLite 데이터베이스 초기화 및 헬퍼 함수.
 """
-import sqlite3
-from datetime import datetime
-from werkzeug.security import generate_password_hash, check_password_hash
+from __future__ import annotations
+
+import json
 import os
+import sqlite3
+from pathlib import Path
+from typing import Iterable, Optional
 
-# Docker 환경에서는 /app/data 디렉토리 사용, 로컬에서는 현재 디렉토리 사용
-if os.path.exists('/app/data'):
-    DB_PATH = '/app/data/wecar_inspection.db'
-else:
-    # 로컬에서는 data 디렉토리 사용 (존재하지 않으면 생성)
-    if os.path.exists('data'):
-        DB_PATH = 'data/wecar_inspection.db'
-    else:
-        DB_PATH = 'wecar_inspection.db'
+from werkzeug.security import generate_password_hash
 
-def get_db_connection():
-    """데이터베이스 연결 반환"""
-    # 데이터베이스 디렉토리가 없으면 생성
-    db_dir = os.path.dirname(DB_PATH)
-    if db_dir and not os.path.exists(db_dir):
-        os.makedirs(db_dir, exist_ok=True)
+BASE_DIR = Path(__file__).resolve().parent
+DB_DIR = Path(os.environ.get("WECAR_DB_DIR", BASE_DIR / "data"))
+DB_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH = DB_DIR / "wecar_diagnosis.db"
+
+
+def get_connection() -> sqlite3.Connection:
+    """
+    sqlite3 Connection 을 row factory 와 함께 반환한다.
+    """
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
-def init_db():
-    """데이터베이스 초기화 및 테이블 생성"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # 사용자 테이블
-    cursor.execute('''
+
+def _has_column(cur: sqlite3.Cursor, table: str, column: str) -> bool:
+    """
+    테이블에 특정 컬럼이 있는지 확인한다.
+    """
+    cur.execute(f"PRAGMA table_info({table})")
+    return any(row[1] == column for row in cur.fetchall())
+
+
+def init_db(seed_demo_data: bool = True) -> None:
+    """
+    테이블 생성 및 기본 데이터 시드.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.executescript(
+        """
+        PRAGMA foreign_keys = ON;
+
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_type TEXT NOT NULL,
             username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            user_type TEXT NOT NULL CHECK(user_type IN ('검수신청', '평가사', '관리자')),
+            password_hash TEXT NOT NULL,
+            email TEXT,
+            phone TEXT,
             company TEXT,
             position TEXT,
             name TEXT NOT NULL,
-            approved INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # 검수신청 테이블
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS inspection_requests (
+            approved INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS diagnosis_requests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            vehicle_number TEXT NOT NULL,
+            applicant_id INTEGER NOT NULL,
+            request_date TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            vehicle_number TEXT,
             lot_number TEXT,
             parking_number TEXT,
-            request_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            status TEXT DEFAULT '신청',
-            sent_date TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-    ''')
-    
-    # 검수신청 상세내역 테이블
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS inspection_details (
+            status TEXT NOT NULL DEFAULT '신청',
+            evaluator_id INTEGER,
+            evaluator_name TEXT,
+            answer_date TEXT,
+            confirmed_at TEXT,
+            translated_summary TEXT,
+            translated_at TEXT,
+            sent_at TEXT,
+            fee INTEGER DEFAULT 120000,
+            FOREIGN KEY (applicant_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (evaluator_id) REFERENCES users(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS diagnosis_request_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            request_id INTEGER NOT NULL,
+            diagnosis_id INTEGER NOT NULL,
             sequence INTEGER NOT NULL,
             content TEXT NOT NULL,
-            FOREIGN KEY (request_id) REFERENCES inspection_requests(id) ON DELETE CASCADE
-        )
-    ''')
-    
-    # 평가사 배정 테이블
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS evaluation_assignments (
+            created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            FOREIGN KEY (diagnosis_id) REFERENCES diagnosis_requests(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS diagnosis_response_details (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            request_id INTEGER NOT NULL,
-            evaluator_id INTEGER NOT NULL,
-            assigned_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            status TEXT DEFAULT '신청' CHECK(status IN ('신청', '평가사배정', '평가완료')),
-            FOREIGN KEY (request_id) REFERENCES inspection_requests(id) ON DELETE CASCADE,
-            FOREIGN KEY (evaluator_id) REFERENCES users(id)
-        )
-    ''')
-    
-    # 평가답변 테이블
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS evaluation_responses (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            request_id INTEGER NOT NULL,
-            evaluator_id INTEGER NOT NULL,
-            response_date TIMESTAMP,
-            confirmed INTEGER DEFAULT 0,
-            sent_date TIMESTAMP,
-            FOREIGN KEY (request_id) REFERENCES inspection_requests(id) ON DELETE CASCADE,
-            FOREIGN KEY (evaluator_id) REFERENCES users(id)
-        )
-    ''')
-    
-    # 평가답변 상세내역 테이블
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS evaluation_response_details (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            response_id INTEGER NOT NULL,
+            diagnosis_id INTEGER NOT NULL,
+            responder_id INTEGER NOT NULL,
             sequence INTEGER NOT NULL,
             content TEXT NOT NULL,
             note TEXT,
-            FOREIGN KEY (response_id) REFERENCES evaluation_responses(id) ON DELETE CASCADE
-        )
-    ''')
-    
-    # 정산관리 테이블
-    cursor.execute('''
+            created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            UNIQUE(diagnosis_id, sequence),
+            FOREIGN KEY (diagnosis_id) REFERENCES diagnosis_requests(id) ON DELETE CASCADE,
+            FOREIGN KEY (responder_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS settlements (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            settlement_date DATE NOT NULL,
-            evaluator_id INTEGER NOT NULL,
-            count INTEGER DEFAULT 0,
-            amount INTEGER DEFAULT 0,
-            vat INTEGER DEFAULT 0,
-            total_amount INTEGER DEFAULT 0,
-            FOREIGN KEY (evaluator_id) REFERENCES users(id)
-        )
-    ''')
-    
-    # 저장된 정산내역 테이블
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS saved_settlements (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            start_date DATE NOT NULL,
-            end_date DATE NOT NULL,
-            data TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    conn.commit()
-    
-    # 기본 관리자 계정 생성
-    admin_password = generate_password_hash('wecar1004')
-    cursor.execute('''
-        INSERT OR IGNORE INTO users (username, password, user_type, name, approved)
-        VALUES (?, ?, ?, ?, ?)
-    ''', ('wecar', admin_password, '관리자', '관리자', 1))
-    
-    # 테스트 계정 생성
-    test1_password = generate_password_hash('1wecar')
-    cursor.execute('''
-        INSERT OR IGNORE INTO users (username, password, user_type, name, approved)
-        VALUES (?, ?, ?, ?, ?)
-    ''', ('wecar1', test1_password, '검수신청', '테스트1', 1))
-    
-    test2_password = generate_password_hash('2wecar')
-    cursor.execute('''
-        INSERT OR IGNORE INTO users (username, password, user_type, name, approved)
-        VALUES (?, ?, ?, ?, ?)
-    ''', ('wecar2', test2_password, '평가사', '테스트2', 1))
-    
+            year INTEGER NOT NULL,
+            month INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            start_date TEXT NOT NULL,
+            end_date TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        );
+        """
+    )
+
+    if seed_demo_data:
+        _seed_users(cur)
+
     conn.commit()
     conn.close()
-    print("데이터베이스 초기화 완료")
 
-if __name__ == '__main__':
-    init_db()
+
+def _seed_users(cur: sqlite3.Cursor) -> None:
+    """
+    기본 계정이 없으면 생성한다.
+    """
+    seeds = [
+        ("관리자", "wecar", "wecar1004", None, None, "위카모빌리티", "관리자", "관리자"),
+        ("진단신청", "wecar1", "1wecar", None, None, "위카모빌리티", "고객", "진단신청자"),
+        ("평가사", "wecar2", "2wecar", None, None, "위카모빌리티", "평가사", "평가사1"),
+    ]
+    for user_type, username, password, email, phone, company, position, name in seeds:
+        cur.execute("SELECT 1 FROM users WHERE username = ?", (username,))
+        if cur.fetchone():
+            continue
+        cur.execute(
+            """
+            INSERT INTO users (user_type, username, password_hash, email, phone, company, position, name, approved)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_type,
+                username,
+                generate_password_hash(password),
+                email,
+                phone,
+                company,
+                position,
+                name,
+                1,
+            ),
+        )
+
+
+def list_users() -> Iterable[sqlite3.Row]:
+    with get_connection() as conn:
+        return conn.execute(
+            "SELECT * FROM users ORDER BY created_at DESC"
+        ).fetchall()
+
+
+def save_settlement_payload(year: int, month: int, title: str, start_date: str, end_date: str, payload: dict) -> int:
+    """
+    정산 데이터를 저장하고 식별자를 반환한다.
+    """
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO settlements (year, month, title, start_date, end_date, payload)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (year, month, title, start_date, end_date, json.dumps(payload, ensure_ascii=False)),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def fetch_settlement(settlement_id: int) -> Optional[sqlite3.Row]:
+    with get_connection() as conn:
+        return conn.execute(
+            "SELECT * FROM settlements WHERE id = ?", (settlement_id,)
+        ).fetchone()
+
+
+__all__ = [
+    "DB_PATH",
+    "get_connection",
+    "init_db",
+    "list_users",
+    "save_settlement_payload",
+    "fetch_settlement",
+]
+
 

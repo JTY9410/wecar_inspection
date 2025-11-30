@@ -1,5 +1,5 @@
 """
-유틸리티 함수 (엑셀, PDF, 번역 등)
+유틸리티 함수 (엑셀, PDF, 번역, 이메일 등)
 """
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
@@ -12,6 +12,9 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from googletrans import Translator
 from datetime import datetime
 import os
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 def export_to_excel(data, headers, filename):
     """데이터를 엑셀 파일로 내보내기"""
@@ -60,7 +63,7 @@ def export_to_excel(data, headers, filename):
     wb.save(filename)
     return filename
 
-def export_to_pdf(data, headers, filename, title="위카아라이 검수시스템"):
+def export_to_pdf(data, headers, filename, title="위카아라이 진단시스템"):
     """데이터를 PDF 파일로 내보내기"""
     doc = SimpleDocTemplate(filename, pagesize=A4)
     elements = []
@@ -128,7 +131,38 @@ def format_date(d):
         return d
     return d.strftime('%Y-%m-%d')
 
-
-
+def send_email(to_email, subject, body_html, body_text=None):
+    """이메일 전송"""
+    try:
+        smtp_server = os.environ.get('SMTP_SERVER', 'smtp.gmail.com')
+        smtp_port = int(os.environ.get('SMTP_PORT', '587'))
+        smtp_user = os.environ.get('SMTP_USER', '')
+        smtp_password = os.environ.get('SMTP_PASSWORD', '')
+        
+        if not smtp_user or not smtp_password:
+            print("이메일 설정이 없습니다. 환경변수 SMTP_USER, SMTP_PASSWORD를 설정해주세요.")
+            return False
+        
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = smtp_user
+        msg['To'] = to_email
+        
+        if body_text:
+            part1 = MIMEText(body_text, 'plain', 'utf-8')
+            msg.attach(part1)
+        
+        part2 = MIMEText(body_html, 'html', 'utf-8')
+        msg.attach(part2)
+        
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+        
+        return True
+    except Exception as e:
+        print(f"이메일 전송 오류: {e}")
+        return False
 
 

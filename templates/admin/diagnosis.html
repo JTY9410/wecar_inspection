@@ -1,0 +1,383 @@
+{% extends "base.html" %}
+
+{% block title %}진단신청관리 - 위카아라이 진단시스템{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="page-header">
+        <div class="d-flex justify-content-between align-items-center flex-wrap">
+            <h2><i class="bi bi-clipboard-check"></i> 진단신청관리</h2>
+            <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline-secondary">
+                <i class="bi bi-house"></i> 관리자메인페이지로
+            </a>
+        </div>
+    </div>
+    
+    <div class="filter-section">
+        <form method="GET" class="row g-3 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label">시작일</label>
+                <input type="date" class="form-control" name="start_date" id="start_date" value="{{ start_date }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">종료일</label>
+                <input type="date" class="form-control" name="end_date" id="end_date" value="{{ end_date }}">
+            </div>
+            <div class="col-md-6">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-search"></i> 검색
+                </button>
+                <a href="{{ url_for('admin_diagnosis_export', fmt='xlsx', start_date=start_date, end_date=end_date) }}" class="btn btn-success">
+                    <i class="bi bi-file-earmark-excel"></i> 엑셀저장
+                </a>
+                <a href="{{ url_for('admin_diagnosis_export', fmt='pdf', start_date=start_date, end_date=end_date) }}" class="btn btn-danger">
+                    <i class="bi bi-file-earmark-pdf"></i> PDF저장
+                </a>
+            </div>
+        </form>
+    </div>
+    
+    <div class="table-wrapper">
+        <table class="table table-hover">
+            <thead class="table-fixed-header">
+                <tr>
+                    <th>순</th>
+                    <th>신청일</th>
+                    <th>상태</th>
+                    <th>차량번호</th>
+                    <th>출품번호</th>
+                    <th>주차번호</th>
+                    <th>진단신청내역</th>
+                    <th>답변일</th>
+                    <th>답변</th>
+                    <th>평가사</th>
+                    <th>확인</th>
+                    <th>번역</th>
+                    <th>전송</th>
+                    <th>작업</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in diagnoses %}
+                {% set row = item.row %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ row.request_date }}</td>
+                    <td>
+                        <span class="badge bg-{% if row.status == '신청' %}secondary{% elif row.status == '답변완료' %}success{% elif row.status == '전송완료' %}info{% else %}warning{% endif %}">
+                            {{ row.status }}
+                        </span>
+                    </td>
+                    <td>{{ row.vehicle_number or '' }}</td>
+                    <td>{{ row.lot_number or '' }}</td>
+                    <td>{{ row.parking_number or '' }}</td>
+                    <td class="text-summary">{{ item.request_summary or '' }}</td>
+                    <td>{{ row.answer_date or '' }}</td>
+                    <td class="text-summary">{{ item.response_summary or '' }}</td>
+                    <td>
+                        {% if row.evaluator_name %}
+                            {{ row.evaluator_name }}
+                        {% else %}
+                            <button class="btn btn-sm btn-outline-primary assign-evaluator-btn" data-id="{{ row.id }}">
+                                <i class="bi bi-person-plus"></i> 선택
+                            </button>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary view-details-btn" data-id="{{ row.id }}">
+                            <i class="bi bi-eye"></i> 확인
+                        </button>
+                    </td>
+                    <td>
+                        <a href="{{ url_for('admin_diagnosis_translate', diagnosis_id=row.id) }}" class="btn btn-sm btn-outline-info" target="_blank">
+                            <i class="bi bi-translate"></i> 번역
+                        </a>
+                    </td>
+                    <td>
+                        {% if row.status == '답변완료' %}
+                        <button class="btn btn-sm btn-success send-btn" data-id="{{ row.id }}">
+                            <i class="bi bi-send"></i> 전송
+                        </button>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if not row.confirmed_at %}
+                        <button class="btn btn-sm btn-warning confirm-btn" data-id="{{ row.id }}">
+                            <i class="bi bi-check-circle"></i> 확인
+                        </button>
+                        {% else %}
+                        <span class="text-muted small">{{ row.confirmed_at[:10] }}</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 평가사 선택 모달 -->
+<div class="modal fade" id="assignEvaluatorModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title"><i class="bi bi-person-plus"></i> 평가사 선택</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">평가사 선택</label>
+                    <select class="form-select" id="evaluatorSelect">
+                        <option value="">선택하세요</option>
+                        {% for evaluator in evaluators %}
+                        <option value="{{ evaluator.id }}">{{ evaluator.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">또는 수기입력</label>
+                    <input type="text" class="form-control" id="manualEvaluatorName" placeholder="평가사 이름을 입력하세요">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-primary" id="assignEvaluatorBtn">저장</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 확인 팝업 모달 -->
+<div class="modal fade" id="detailsModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title"><i class="bi bi-clipboard-data"></i> 진단신청 상세</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="detailsModalBody">
+                <!-- 내용이 동적으로 로드됨 -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">이전페이지로</button>
+                <button type="button" class="btn btn-success" id="confirmCompleteBtn" style="display:none;">
+                    <i class="bi bi-check-circle"></i> 확인완료
+                </button>
+                <button type="button" class="btn btn-info" id="translateBtn" style="display:none;">
+                    <i class="bi bi-translate"></i> 번역
+                </button>
+                <a href="#" class="btn btn-success" id="excelExportBtn" style="display:none;" target="_blank">
+                    <i class="bi bi-file-earmark-excel"></i> 엑셀저장
+                </a>
+                <a href="#" class="btn btn-danger" id="pdfExportBtn" style="display:none;" target="_blank">
+                    <i class="bi bi-file-earmark-pdf"></i> PDF저장
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+$(document).ready(function() {
+    setDefaultDateRange(7);
+    let currentDiagnosisId = null;
+    
+    // 확인 버튼 클릭
+    $('.view-details-btn').on('click', function() {
+        currentDiagnosisId = $(this).data('id');
+        $('#detailsModalBody').html('<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">로딩 중...</span></div></div>');
+        $('#detailsModal').modal('show');
+        
+        // 상세 정보 로드 (JSON API 사용)
+        $.ajax({
+            url: `/admin/diagnosis/${currentDiagnosisId}/json`,
+            method: 'GET',
+            success: function(response) {
+                if (!response.success) {
+                    $('#detailsModalBody').html('<div class="alert alert-danger">' + (response.message || '상세 정보를 불러올 수 없습니다.') + '</div>');
+                    return;
+                }
+                
+                const diag = response.diagnosis;
+                let tableRows = '';
+                response.table_data.forEach(function(row) {
+                    tableRows += `
+                        <tr>
+                            <td>${row.sequence}</td>
+                            <td>${row.request_content || ''}</td>
+                            <td>${row.response_content || ''}</td>
+                            <td>${row.note || ''}</td>
+                        </tr>
+                    `;
+                });
+                
+                let modalContent = `
+                    <div class="card mb-3">
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-3"><strong>신청일:</strong> ${diag.request_date}</div>
+                                <div class="col-md-3"><strong>차량번호:</strong> ${diag.vehicle_number}</div>
+                                <div class="col-md-3"><strong>출품번호:</strong> ${diag.lot_number}</div>
+                                <div class="col-md-3"><strong>주차번호:</strong> ${diag.parking_number}</div>
+                            </div>
+                            <div class="row mt-2">
+                                <div class="col-md-3"><strong>평가사명:</strong> ${diag.evaluator_name}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="table-wrapper">
+                        <table class="table table-bordered">
+                            <thead class="table-fixed-header">
+                                <tr>
+                                    <th>순</th>
+                                    <th>진단신청내역</th>
+                                    <th>답변내역</th>
+                                    <th>비고</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${tableRows}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="text-center mt-4 mb-4">
+                        <div style="font-size: 2rem; font-weight: bold; color: #0066cc;">위카</div>
+                        <p class="mt-2"><strong>위카모빌리티 주식회사</strong></p>
+                    </div>
+                `;
+                
+                $('#detailsModalBody').html(modalContent);
+                if (!diag.confirmed_at) {
+                    $('#confirmCompleteBtn').show();
+                }
+                $('#translateBtn').show();
+                $('#excelExportBtn').attr('href', `/admin/diagnosis/${currentDiagnosisId}/detail/export/xlsx`).show();
+                $('#pdfExportBtn').attr('href', `/admin/diagnosis/${currentDiagnosisId}/detail/export/pdf`).show();
+            },
+            error: function(xhr, status, error) {
+                console.error('Error loading details:', error);
+                $('#detailsModalBody').html('<div class="alert alert-danger">상세 정보를 불러올 수 없습니다. 오류: ' + error + '</div>');
+            }
+        });
+    });
+    
+    // 확인완료 버튼
+    $('#confirmCompleteBtn').on('click', function() {
+        if (!currentDiagnosisId) return;
+        if (confirm('확인 완료 처리하시겠습니까?')) {
+            $.ajax({
+                url: `/admin/diagnosis/${currentDiagnosisId}/confirm`,
+                method: 'POST',
+                success: function(response) {
+                    if (response.success) {
+                        alert('확인 완료되었습니다.');
+                        $('#detailsModal').modal('hide');
+                        location.reload();
+                    }
+                }
+            });
+        }
+    });
+    
+    // 번역 버튼
+    $('#translateBtn').on('click', function() {
+        if (!currentDiagnosisId) return;
+        window.open(`/admin/diagnosis/${currentDiagnosisId}/translate`, '_blank');
+    });
+    
+    $('.confirm-btn').on('click', function() {
+        const id = $(this).data('id');
+        if (confirm('확인 처리하시겠습니까?')) {
+            $.ajax({
+                url: `/admin/diagnosis/${id}/confirm`,
+                method: 'POST',
+                success: function(response) {
+                    if (response.success) {
+                        alert('확인되었습니다.');
+                        location.reload();
+                    }
+                }
+            });
+        }
+    });
+    
+    $('.send-btn').on('click', function() {
+        const id = $(this).data('id');
+        if (confirm('번역된 결과를 이메일로 전송하시겠습니까?')) {
+            $.ajax({
+                url: `/admin/diagnosis/${id}/send`,
+                method: 'POST',
+                success: function(response) {
+                    if (response.success) {
+                        alert('전송되었습니다.');
+                        location.reload();
+                    } else {
+                        alert(response.message);
+                    }
+                }
+            });
+        }
+    });
+    
+    // 평가사 선택 버튼
+    let currentAssignDiagnosisId = null;
+    $('.assign-evaluator-btn').on('click', function() {
+        currentAssignDiagnosisId = $(this).data('id');
+        $('#evaluatorSelect').val('');
+        $('#manualEvaluatorName').val('');
+        $('#assignEvaluatorModal').modal('show');
+    });
+    
+    // 평가사 배정 저장
+    $(document).on('click', '#assignEvaluatorBtn', function() {
+        if (!currentAssignDiagnosisId) {
+            alert('진단신청 ID가 없습니다. 페이지를 새로고침해주세요.');
+            return;
+        }
+        
+        const evaluatorId = $('#evaluatorSelect').val();
+        const manualName = $('#manualEvaluatorName').val().trim();
+        
+        if (!evaluatorId && !manualName) {
+            alert('평가사를 선택하거나 입력해주세요.');
+            return;
+        }
+        
+        const saveBtn = $(this);
+        const originalText = saveBtn.html();
+        saveBtn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm"></span> 저장 중...');
+        
+        $.ajax({
+            url: `/admin/diagnosis/${currentAssignDiagnosisId}/assign-evaluator`,
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                evaluator_id: evaluatorId || null,
+                manual_name: manualName
+            }),
+            success: function(response) {
+                saveBtn.prop('disabled', false).html(originalText);
+                if (response.success) {
+                    alert('평가사가 배정되었습니다. 평가사에게 알림이 전송되었습니다.');
+                    $('#assignEvaluatorModal').modal('hide');
+                    location.reload();
+                } else {
+                    alert(response.message || '저장 중 오류가 발생했습니다.');
+                }
+            },
+            error: function(xhr, status, error) {
+                saveBtn.prop('disabled', false).html(originalText);
+                console.error('Error:', error);
+                console.error('Response:', xhr.responseText);
+                alert('저장 중 오류가 발생했습니다: ' + (xhr.responseJSON?.message || error));
+            }
+        });
+    });
+});
+</script>
+{% endblock %}
+

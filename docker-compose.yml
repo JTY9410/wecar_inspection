@@ -1,22 +1,23 @@
+version: '3.8'
+
 services:
-  wecar-inspection:
-    build: .
+  wecar-diagnosis:
+    image: wecarmobility/wecar-diagnosis:latest
+    container_name: wecar-diagnosis
     ports:
-      - "2000:2000"
+      - "3010:3010"
     volumes:
-      - .:/app
       - ./data:/app/data
-      - ./static:/app/static
-      - ./templates:/app/templates
+      - ./exports:/app/exports
     environment:
-      - FLASK_ENV=production
+      - PORT=3010
+      - WECAR_DB_DIR=/app/data
       - FLASK_DEBUG=0
-      - PORT=2000
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:2000/"]
+      test: ["CMD", "curl", "-f", "http://localhost:3010/"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+
 

@@ -1,45 +1,63 @@
 {% extends "base.html" %}
 
-{% block title %}정산내역 보기 - 위카아라이 검수시스템{% endblock %}
+{% block title %}정산내역 보기 - 위카아라이 진단시스템{% endblock %}
 
 {% block content %}
 <div class="container-fluid py-4">
     <div class="page-header">
-        <a href="{{ url_for('admin_settlements') }}" class="btn btn-outline-secondary mb-3">
-            <i class="bi bi-arrow-left"></i> 이전페이지로
-        </a>
-        <h2><i class="bi bi-calculator"></i> 정산내역: {{ settlement.name }}</h2>
+        <div class="d-flex justify-content-between align-items-center">
+            <h2><i class="bi bi-calculator"></i> 정산내역 - {{ settlement.title }}</h2>
+            <a href="{{ url_for('admin_settlements') }}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> 이전페이지로
+            </a>
+        </div>
     </div>
     
-    <div class="table-container">
-        <div class="table-responsive">
-            <table class="table table-bordered">
-                <thead>
-                    <tr>
-                        <th>일자</th>
-                        <th>평가사</th>
-                        <th>건수</th>
-                        <th>금액</th>
-                        <th>VAT</th>
-                        <th>청구액</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in data %}
-                    <tr>
-                        {% for cell in row %}
-                        <td>{{ cell }}</td>
-                        {% endfor %}
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+    <div class="table-wrapper">
+        <table class="table table-bordered">
+            <thead class="table-fixed-header">
+                <tr>
+                    <th>일자</th>
+                    <th>평가사</th>
+                    <th>건수</th>
+                    <th>금액</th>
+                    <th>VAT</th>
+                    <th>청구액</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for day, info in payload.days.items() %}
+                {% for row in info.rows %}
+                <tr>
+                    <td>{{ day }}</td>
+                    <td>{{ row.evaluator_name }}</td>
+                    <td>{{ row.count }}</td>
+                    <td>{{ "{:,}".format(row.amount) }}</td>
+                    <td>{{ "{:,}".format(row.vat) }}</td>
+                    <td>{{ "{:,}".format(row.grand) }}</td>
+                </tr>
+                {% endfor %}
+                <tr class="table-secondary">
+                    <td><strong>{{ day }} 소계</strong></td>
+                    <td></td>
+                    <td><strong>{{ info.subtotal_count }}</strong></td>
+                    <td><strong>{{ "{:,}".format(info.subtotal_amount) }}</strong></td>
+                    <td><strong>{{ "{:,}".format(info.subtotal_amount * 0.1|int) }}</strong></td>
+                    <td><strong>{{ "{:,}".format(info.subtotal_amount + (info.subtotal_amount * 0.1|int)) }}</strong></td>
+                </tr>
+                {% endfor %}
+                <tr class="table-primary">
+                    <td><strong>총합</strong></td>
+                    <td></td>
+                    <td><strong>{{ payload.total_count }}</strong></td>
+                    <td><strong>{{ "{:,}".format(payload.total_amount) }}</strong></td>
+                    <td><strong>{{ "{:,}".format(payload.total_vat) }}</strong></td>
+                    <td><strong>{{ "{:,}".format(payload.total_grand) }}</strong></td>
+                </tr>
+            </tbody>
+        </table>
     </div>
 </div>
 {% endblock %}
-
-
-
 
 

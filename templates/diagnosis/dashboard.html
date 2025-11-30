@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}평가사 대시보드 - 위카아라이 진단시스템{% endblock %}
+{% block title %}진단신청 메인페이지 - 위카아라이 진단시스템{% endblock %}
 
 {% block content %}
 <div class="container-fluid py-4">
     <div class="page-header">
         <div class="d-flex justify-content-between align-items-center">
-            <h2><i class="bi bi-speedometer2"></i> 평가사 대시보드</h2>
+            <h2><i class="bi bi-speedometer2"></i> 진단신청 메인페이지</h2>
             <div>
                 <span class="me-3"><strong>{{ session.name }}</strong>님</span>
                 <a href="{{ url_for('logout') }}" class="btn btn-outline-danger">
@@ -20,10 +20,10 @@
         <div class="col-12 col-md-6">
             <div class="card h-100 shadow-sm hover-card">
                 <div class="card-body text-center">
-                    <i class="bi bi-pencil-square fs-1 text-primary mb-3"></i>
-                    <h4 class="card-title">답변입력</h4>
-                    <p class="card-text text-muted">진단 신청에 대한 평가 답변을 입력합니다</p>
-                    <a href="{{ url_for('evaluator_response') }}" class="btn btn-primary btn-lg w-100">
+                    <i class="bi bi-clipboard-plus fs-1 text-primary mb-3"></i>
+                    <h4 class="card-title">진단신청</h4>
+                    <p class="card-text text-muted">새로운 진단 신청을 제출합니다</p>
+                    <a href="{{ url_for('diagnosis_request') }}" class="btn btn-primary btn-lg w-100">
                         <i class="bi bi-arrow-right-circle"></i> 이동하기
                     </a>
                 </div>
@@ -33,9 +33,9 @@
             <div class="card h-100 shadow-sm hover-card">
                 <div class="card-body text-center">
                     <i class="bi bi-clock-history fs-1 text-success mb-3"></i>
-                    <h4 class="card-title">답변내역</h4>
-                    <p class="card-text text-muted">입력한 답변 내역을 조회하고 수정합니다</p>
-                    <a href="{{ url_for('evaluator_response_history') }}" class="btn btn-success btn-lg w-100">
+                    <h4 class="card-title">진단신청내역</h4>
+                    <p class="card-text text-muted">진단 신청 내역을 조회합니다</p>
+                    <a href="{{ url_for('diagnosis_history') }}" class="btn btn-success btn-lg w-100">
                         <i class="bi bi-arrow-right-circle"></i> 이동하기
                     </a>
                 </div>
@@ -44,4 +44,5 @@
     </div>
 </div>
 {% endblock %}
+
 

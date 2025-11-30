@@ -1,1652 +1,1621 @@
-"""
-위카아라이 검수시스템 Flask 애플리케이션
-"""
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file
-from werkzeug.security import check_password_hash, generate_password_hash
-from database import get_db_connection, init_db, DB_PATH
-from utils import export_to_excel, export_to_pdf, translate_to_japanese, format_datetime, format_date
-from datetime import datetime, date
-import os
+from __future__ import annotations
+
 import json
-import traceback
+import os
+import sqlite3
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+from flask import (
+    Flask,
+    abort,
+    g,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    session,
+    url_for,
+)
+from werkzeug.security import check_password_hash, generate_password_hash
+
+from database import DB_PATH, fetch_settlement, init_db, list_users, save_settlement_payload
+from utils import export_to_excel, export_to_pdf, format_datetime, send_email, translate_to_japanese
+
+BASE_DIR = Path(__file__).resolve().parent
+EXPORT_DIR = BASE_DIR / "exports"
+EXPORT_DIR.mkdir(exist_ok=True)
+
+init_db()
 
 app = Flask(__name__)
-app.secret_key = 'wecar_inspection_secret_key_2024'
+app.config["SECRET_KEY"] = os.environ.get("WECAR_SECRET_KEY", "wecar-dev-secret")
+app.permanent_session_lifetime = timedelta(hours=6)
 
-# 데이터베이스 초기화
-try:
-    if not os.path.exists(DB_PATH):
-        print(f"데이터베이스가 없습니다. 초기화를 시작합니다. 경로: {DB_PATH}")
-        init_db()
-    else:
-        print(f"데이터베이스가 존재합니다. 경로: {DB_PATH}")
-except Exception as e:
-    print(f"데이터베이스 초기화 중 오류 발생: {str(e)}")
-    if app.debug:
-        print(traceback.format_exc())
+DEFAULT_REQUEST_ITEMS = [
+    "외관 점검 내역",
+    "실내 및 전장 점검 내역",
+    "엔진/동력계 점검 내역",
+    "하부/프레임 점검 내역",
+    "기타 요청사항",
+]
 
-# 에러 핸들러 추가
-@app.errorhandler(500)
-def internal_error(error):
-    """500 에러 핸들러"""
-    # JSON 요청인지 확인
-    if request.is_json or request.path.startswith('/api/'):
-        return jsonify({
-            'success': False,
-            'message': 'Internal Server Error',
-            'error': str(error) if app.debug else 'An error occurred'
-        }), 500
-    # HTML 요청인 경우 에러 페이지 반환
-    return f"<h1>Internal Server Error</h1><p>{str(error) if app.debug else 'An error occurred'}</p>", 500
 
-@app.errorhandler(404)
-def not_found(error):
-    """404 에러 핸들러"""
-    if request.is_json or request.path.startswith('/api/'):
-        return jsonify({
-            'success': False,
-            'message': 'Not Found'
-        }), 404
-    return "<h1>Not Found</h1>", 404
+def get_db() -> sqlite3.Connection:
+    if "db" not in g:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        g.db = conn
+    return g.db
 
-@app.errorhandler(Exception)
-def handle_exception(e):
-    """모든 예외 처리"""
-    # 로그 출력
-    print(f"Error: {str(e)}")
-    if app.debug:
-        print(traceback.format_exc())
-    
-    # JSON 요청인지 확인
-    if request.is_json or request.path.startswith('/api/'):
-        if app.debug:
-            return jsonify({
-                'success': False,
-                'message': str(e),
-                'traceback': traceback.format_exc()
-            }), 500
-        return jsonify({
-            'success': False,
-            'message': 'An error occurred'
-        }), 500
-    
-    # HTML 요청인 경우
-    if app.debug:
-        return f"<h1>Error</h1><pre>{traceback.format_exc()}</pre>", 500
-    return "<h1>An error occurred</h1>", 500
 
-def login_required(f):
-    """로그인 필요 데코레이터"""
-    def decorated_function(*args, **kwargs):
-        if 'user_id' not in session:
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    decorated_function.__name__ = f.__name__
-    return decorated_function
+@app.teardown_appcontext
+def close_db(_: Optional[BaseException]) -> None:
+    db = g.pop("db", None)
+    if db is not None:
+        db.close()
 
-def admin_required(f):
-    """관리자 권한 필요 데코레이터"""
-    def decorated_function(*args, **kwargs):
-        try:
-            if 'user_id' not in session:
-                return redirect(url_for('login'))
-            conn = get_db_connection()
-            try:
-                user = conn.execute('SELECT user_type FROM users WHERE id = ?', (session['user_id'],)).fetchone()
-                if not user or user['user_type'] != '관리자':
-                    return redirect(url_for('dashboard'))
-            finally:
-                conn.close()
-            return f(*args, **kwargs)
-        except Exception as e:
-            if app.debug:
-                return jsonify({'success': False, 'message': f'Error: {str(e)}', 'traceback': traceback.format_exc()}), 500
-            return jsonify({'success': False, 'message': 'An error occurred'}), 500
-    decorated_function.__name__ = f.__name__
-    return decorated_function
 
-@app.route('/')
+def login_required(func):
+    from functools import wraps
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if "user_id" not in session:
+            return redirect(url_for("login"))
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+def role_required(*roles):
+    from functools import wraps
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if "user_type" not in session or session["user_type"] not in roles:
+                abort(403)
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def current_user() -> Optional[sqlite3.Row]:
+    if "user_id" not in session:
+        return None
+    if hasattr(g, "current_user"):
+        return g.current_user
+    db = get_db()
+    row = db.execute("SELECT * FROM users WHERE id = ?", (session["user_id"],)).fetchone()
+    g.current_user = row
+    return row
+
+
+def _resolve_redirect(user_type: str) -> str:
+    mapping = {
+        "관리자": "admin_dashboard",
+        "진단신청": "diagnosis_dashboard",
+        "평가사": "evaluator_dashboard",
+    }
+    route = mapping.get(user_type, "login")
+    return url_for(route)
+
+
+def _parse_date_range(default_days: int = 7) -> Tuple[Optional[str], Optional[str]]:
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    if not start_date or not end_date:
+        today = datetime.now().date()
+        start = today - timedelta(days=default_days)
+        start_date = start.isoformat()
+        end_date = today.isoformat()
+    return start_date, end_date
+
+
+def _fetch_diagnosis(diagnosis_id: int) -> Optional[sqlite3.Row]:
+    db = get_db()
+    return db.execute(
+        """
+        SELECT dr.*, applicant.name AS applicant_name, evaluator.name AS evaluator_name
+        FROM diagnosis_requests dr
+        JOIN users AS applicant ON applicant.id = dr.applicant_id
+        LEFT JOIN users AS evaluator ON evaluator.id = dr.evaluator_id
+        WHERE dr.id = ?
+        """,
+        (diagnosis_id,),
+    ).fetchone()
+
+
+def _fetch_request_details(diagnosis_id: int) -> List[sqlite3.Row]:
+    db = get_db()
+    return db.execute(
+        """
+        SELECT * FROM diagnosis_request_items
+        WHERE diagnosis_id = ?
+        ORDER BY sequence ASC
+        LIMIT 5
+        """,
+        (diagnosis_id,),
+    ).fetchall()
+
+
+def _fetch_response_details(diagnosis_id: int) -> List[sqlite3.Row]:
+    db = get_db()
+    return db.execute(
+        """
+        SELECT d.*, u.name AS responder_name
+        FROM diagnosis_response_details d
+        JOIN users u ON u.id = d.responder_id
+        WHERE d.diagnosis_id = ?
+        ORDER BY sequence ASC
+        """,
+        (diagnosis_id,),
+    ).fetchall()
+
+
+def _summarize_details(rows: Iterable[sqlite3.Row], field: str) -> str:
+    parts: List[str] = []
+    for row in rows:
+        value = row[field]
+        if not value:
+            continue
+        parts.append(value.strip())
+    return "/".join(parts[:5])
+
+
+@app.route("/")
 def index():
-    """메인 페이지 - 로그인 페이지로 리다이렉트"""
-    return redirect(url_for('login'))
+    """루트 경로: 로그인되지 않은 사용자는 로그인 페이지로, 로그인된 사용자는 역할별 대시보드로"""
+    if "user_id" not in session:
+        return redirect(url_for("login"))
+    return redirect(_resolve_redirect(session.get("user_type", "")))
 
-@app.route('/login', methods=['GET', 'POST'])
+
+@app.route("/login", methods=["GET", "POST"])
 def login():
-    """로그인 페이지"""
-    if request.method == 'POST':
-        try:
-            username = request.form.get('username')
-            password = request.form.get('password')
-            
-            if not username or not password:
-                return jsonify({'success': False, 'message': '아이디와 비밀번호를 입력해주세요.'})
-            
-            conn = get_db_connection()
-            try:
-                user = conn.execute(
-                    'SELECT * FROM users WHERE username = ?', (username,)
-                ).fetchone()
-            finally:
-                conn.close()
-            
-            if user and check_password_hash(user['password'], password):
-                if user['approved'] == 0:
-                    return jsonify({'success': False, 'message': '회원가입승인이 미완료 되었습니다. 완료후 이용하여주세요.'})
-                
-                session['user_id'] = user['id']
-                session['username'] = user['username']
-                session['user_type'] = user['user_type']
-                session['name'] = user['name']
-                
-                # 사용자 타입에 따라 대시보드로 이동
-                if user['user_type'] == '관리자':
-                    return jsonify({'success': True, 'redirect': url_for('admin_dashboard')})
-                elif user['user_type'] == '검수신청':
-                    return jsonify({'success': True, 'redirect': url_for('inspection_dashboard')})
-                elif user['user_type'] == '평가사':
-                    return jsonify({'success': True, 'redirect': url_for('evaluator_dashboard')})
-            else:
-                return jsonify({'success': False, 'message': '아이디 또는 비밀번호가 올바르지 않습니다.'})
-        except Exception as e:
-            if app.debug:
-                return jsonify({'success': False, 'message': f'로그인 중 오류가 발생했습니다: {str(e)}', 'traceback': traceback.format_exc()}), 500
-            return jsonify({'success': False, 'message': '로그인 중 오류가 발생했습니다.'}), 500
-    
-    return render_template('login.html')
+    if request.method == "GET":
+        return render_template("login.html")
 
-@app.route('/register', methods=['POST'])
+    username = request.form.get("username", "").strip()
+    password = request.form.get("password", "").strip()
+
+    if not username or not password:
+        return jsonify(success=False, message="아이디와 비밀번호를 입력해주세요.")
+
+    db = get_db()
+    user = db.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+
+    if not user or not check_password_hash(user["password_hash"], password):
+        return jsonify(success=False, message="아이디 또는 비밀번호가 올바르지 않습니다.")
+
+    if not user["approved"]:
+        return jsonify(
+            success=False,
+            message="회원가입승인이 미완료 되었습니다 완료후 이용하여주세요",
+        )
+
+    session.permanent = True
+    session["user_id"] = user["id"]
+    session["username"] = user["username"]
+    session["user_type"] = user["user_type"]
+    session["name"] = user["name"]
+
+    return jsonify(success=True, redirect=_resolve_redirect(user["user_type"]))
+
+
+@app.route("/register", methods=["POST"])
 def register():
-    """회원가입"""
     data = request.get_json()
-    username = data.get('username')
-    password = data.get('password')
-    password_confirm = data.get('password_confirm')
-    user_type = data.get('user_type')
-    company = data.get('company', '')
-    position = data.get('position', '')
-    name = data.get('name')
-    
-    if password != password_confirm:
-        return jsonify({'success': False, 'message': '비밀번호가 일치하지 않습니다.'})
-    
-    conn = get_db_connection()
-    try:
-        existing_user = conn.execute(
-            'SELECT id FROM users WHERE username = ?', (username,)
-        ).fetchone()
-        
-        if existing_user:
-            return jsonify({'success': False, 'message': '이미 존재하는 아이디입니다.'})
-        
-        hashed_password = generate_password_hash(password)
-        conn.execute('''
-            INSERT INTO users (username, password, user_type, company, position, name, approved)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (username, hashed_password, user_type, company, position, name, 0))
-        conn.commit()
-        return jsonify({'success': True, 'message': '회원가입 신청이 완료되었습니다. 관리자 승인 후 이용 가능합니다.'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': f'회원가입 중 오류가 발생했습니다: {str(e)}'})
-    finally:
-        conn.close()
+    user_type = data.get("user_type", "").strip()
+    username = data.get("username", "").strip()
+    password = data.get("password", "").strip()
+    password_confirm = data.get("password_confirm", "").strip()
+    email = data.get("email", "").strip()
+    phone = data.get("phone", "").strip()
+    company = data.get("company", "").strip()
+    position = data.get("position", "").strip()
+    name = data.get("name", "").strip()
 
-@app.route('/logout')
+    if not user_type or user_type not in ("진단신청", "평가사"):
+        return jsonify(success=False, message="회원가입구분을 선택해주세요.")
+    if not username:
+        return jsonify(success=False, message="아이디를 입력해주세요.")
+    if not password or password != password_confirm:
+        return jsonify(success=False, message="비밀번호가 일치하지 않습니다.")
+    if not name:
+        return jsonify(success=False, message="이름을 입력해주세요.")
+
+    db = get_db()
+    if db.execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone():
+        return jsonify(success=False, message="이미 사용 중인 아이디입니다.")
+
+    db.execute(
+        """
+        INSERT INTO users (user_type, username, password_hash, email, phone, company, position, name, approved)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            user_type,
+            username,
+            generate_password_hash(password),
+            email,
+            phone,
+            company,
+            position,
+            name,
+            0,
+        ),
+    )
+    db.commit()
+
+    return jsonify(success=True, message="회원가입 신청이 완료되었습니다. 관리자 승인 후 이용 가능합니다.")
+
+
+@app.route("/logout")
 def logout():
-    """로그아웃"""
     session.clear()
-    return redirect(url_for('login'))
+    return redirect(url_for("login"))
 
-# 관리자 페이지
-@app.route('/admin/dashboard')
-@admin_required
+
+# ------------------- 관리자 영역 ------------------- #
+
+
+@app.route("/admin/dashboard")
+@login_required
+@role_required("관리자")
 def admin_dashboard():
-    """관리자 대시보드"""
-    return render_template('admin/dashboard.html')
+    return render_template("admin/dashboard.html")
 
-@app.route('/admin/users')
-@admin_required
+
+@app.route("/admin/users")
+@login_required
+@role_required("관리자")
 def admin_users():
-    """회원관리 페이지"""
-    conn = get_db_connection()
-    users = conn.execute('SELECT * FROM users ORDER BY created_at DESC').fetchall()
-    conn.close()
-    return render_template('admin/users.html', users=users)
+    users = list(list_users())
+    return render_template("admin/users.html", users=users)
 
-@app.route('/admin/users/update', methods=['POST'])
-@admin_required
+
+@app.route("/admin/users/create", methods=["POST"])
+@login_required
+@role_required("관리자")
+def admin_users_create():
+    data = request.get_json()
+    user_type = data.get("user_type", "").strip()
+    username = data.get("username", "").strip()
+    password = data.get("password", "").strip()
+    password_confirm = data.get("password_confirm", "").strip()
+    email = data.get("email", "").strip()
+    phone = data.get("phone", "").strip()
+    company = data.get("company", "").strip()
+    position = data.get("position", "").strip()
+    name = data.get("name", "").strip()
+
+    if not user_type or user_type not in ("진단신청", "평가사", "관리자"):
+        return jsonify(success=False, message="회원가입구분을 선택해주세요.")
+    if not username:
+        return jsonify(success=False, message="아이디를 입력해주세요.")
+    if not password or password != password_confirm:
+        return jsonify(success=False, message="비밀번호가 일치하지 않습니다.")
+    if not name:
+        return jsonify(success=False, message="이름을 입력해주세요.")
+
+    db = get_db()
+    if db.execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone():
+        return jsonify(success=False, message="이미 사용 중인 아이디입니다.")
+
+    db.execute(
+        """
+        INSERT INTO users (user_type, username, password_hash, email, phone, company, position, name, approved)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            user_type,
+            username,
+            generate_password_hash(password),
+            email,
+            phone,
+            company,
+            position,
+            name,
+            1,
+        ),
+    )
+    db.commit()
+
+    return jsonify(success=True)
+
+
+@app.route("/admin/users/update", methods=["POST"])
+@login_required
+@role_required("관리자")
 def admin_users_update():
-    """회원 정보 수정"""
     data = request.get_json()
-    user_id = data.get('id')
-    username = data.get('username')
-    password = data.get('password')
-    user_type = data.get('user_type')
-    company = data.get('company', '')
-    position = data.get('position', '')
-    name = data.get('name')
-    
-    conn = get_db_connection()
-    try:
-        if password:
-            hashed_password = generate_password_hash(password)
-            conn.execute('''
-                UPDATE users SET username=?, password=?, user_type=?, company=?, position=?, name=?
-                WHERE id=?
-            ''', (username, hashed_password, user_type, company, position, name, user_id))
-        else:
-            conn.execute('''
-                UPDATE users SET username=?, user_type=?, company=?, position=?, name=?
-                WHERE id=?
-            ''', (username, user_type, company, position, name, user_id))
-        conn.commit()
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-    finally:
-        conn.close()
+    user_id = data.get("id")
+    if not user_id:
+        return jsonify(success=False, message="잘못된 요청입니다.")
 
-@app.route('/admin/users/delete', methods=['POST'])
-@admin_required
+    db = get_db()
+    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user:
+        return jsonify(success=False, message="사용자를 찾을 수 없습니다.")
+
+    user_type = data.get("user_type", "").strip()
+    username = data.get("username", "").strip()
+    password = data.get("password", "").strip()
+    password_confirm = data.get("password_confirm", "").strip()
+    email = data.get("email", "").strip()
+    phone = data.get("phone", "").strip()
+    company = data.get("company", "").strip()
+    position = data.get("position", "").strip()
+    name = data.get("name", "").strip()
+    approved = data.get("approved", False)
+
+    if password and password != password_confirm:
+        return jsonify(success=False, message="비밀번호가 일치하지 않습니다.")
+
+    update_fields = []
+    params = []
+
+    if user_type:
+        update_fields.append("user_type = ?")
+        params.append(user_type)
+    if username and username != user["username"]:
+        existing = db.execute("SELECT 1 FROM users WHERE username = ? AND id != ?", (username, user_id)).fetchone()
+        if existing:
+            return jsonify(success=False, message="이미 사용 중인 아이디입니다.")
+        update_fields.append("username = ?")
+        params.append(username)
+    if password:
+        update_fields.append("password_hash = ?")
+        params.append(generate_password_hash(password))
+    if email is not None:
+        update_fields.append("email = ?")
+        params.append(email)
+    if phone is not None:
+        update_fields.append("phone = ?")
+        params.append(phone)
+    if company is not None:
+        update_fields.append("company = ?")
+        params.append(company)
+    if position is not None:
+        update_fields.append("position = ?")
+        params.append(position)
+    if name:
+        update_fields.append("name = ?")
+        params.append(name)
+    if approved is not None:
+        update_fields.append("approved = ?")
+        params.append(1 if approved else 0)
+
+    if update_fields:
+        params.append(user_id)
+        db.execute(
+            f"UPDATE users SET {', '.join(update_fields)} WHERE id = ?",
+            params,
+        )
+        db.commit()
+
+    return jsonify(success=True)
+
+
+@app.route("/admin/users/delete", methods=["POST"])
+@login_required
+@role_required("관리자")
 def admin_users_delete():
-    """회원 삭제"""
     data = request.get_json()
-    user_id = data.get('id')
-    
-    conn = get_db_connection()
-    try:
-        conn.execute('DELETE FROM users WHERE id = ?', (user_id,))
-        conn.commit()
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-    finally:
-        conn.close()
+    user_id = data.get("id")
+    if not user_id:
+        return jsonify(success=False, message="잘못된 요청입니다.")
+    if user_id == session.get("user_id"):
+        return jsonify(success=False, message="본인 계정은 삭제할 수 없습니다.")
+    db = get_db()
+    db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    db.commit()
+    return jsonify(success=True)
 
-@app.route('/admin/users/approve', methods=['POST'])
-@admin_required
-def admin_users_approve():
-    """회원가입 승인"""
-    data = request.get_json()
-    user_id = data.get('id')
-    approved = data.get('approved', 1)
-    
-    conn = get_db_connection()
-    try:
-        conn.execute('UPDATE users SET approved = ? WHERE id = ?', (approved, user_id))
-        conn.commit()
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-    finally:
-        conn.close()
 
-@app.route('/admin/inspections')
-@admin_required
-def admin_inspections():
-    """검수신청관리 페이지"""
-    start_date = request.args.get('start_date', '')
-    end_date = request.args.get('end_date', '')
-    
-    conn = get_db_connection()
-    query = '''
-        SELECT ir.*, u.name as user_name,
-               GROUP_CONCAT(id.content, '/') as inspection_contents,
-               er.response_date, er.sent_date,
-               GROUP_CONCAT(erd.content, '/') as response_contents,
-               ea.evaluator_id, ev.name as evaluator_name
-        FROM inspection_requests ir
-        LEFT JOIN users u ON ir.user_id = u.id
-        LEFT JOIN inspection_details id ON ir.id = id.request_id
-        LEFT JOIN evaluation_assignments ea ON ir.id = ea.request_id
-        LEFT JOIN users ev ON ea.evaluator_id = ev.id
-        LEFT JOIN evaluation_responses er ON ir.id = er.request_id AND er.evaluator_id = ea.evaluator_id
-        LEFT JOIN evaluation_response_details erd ON er.id = erd.response_id
-    '''
-    
-    conditions = []
+def _filter_clause(date_field: str = "request_date") -> Tuple[str, List[Any]]:
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    clauses = []
+    params: List[Any] = []
     if start_date:
-        conditions.append(f"DATE(ir.request_date) >= '{start_date}'")
+        clauses.append(f"date({date_field}) >= date(?)")
+        params.append(start_date)
     if end_date:
-        conditions.append(f"DATE(ir.request_date) <= '{end_date}'")
-    
-    if conditions:
-        query += ' WHERE ' + ' AND '.join(conditions)
-    
-    query += ' GROUP BY ir.id ORDER BY ir.request_date DESC'
-    
-    inspections = conn.execute(query).fetchall()
-    conn.close()
-    
-    return render_template('admin/inspections.html', inspections=inspections, start_date=start_date, end_date=end_date)
+        clauses.append(f"date({date_field}) <= date(?)")
+        params.append(end_date)
+    clause = ""
+    if clauses:
+        clause = " AND " + " AND ".join(clauses)
+    return clause, params
 
-@app.route('/admin/inspections/<int:request_id>/details')
-@admin_required
-def admin_inspection_details(request_id):
-    """검수신청 상세보기"""
-    conn = get_db_connection()
-    request_info = conn.execute('''
-        SELECT ir.*, u.name as user_name, ev.name as evaluator_name
-        FROM inspection_requests ir
-        LEFT JOIN users u ON ir.user_id = u.id
-        LEFT JOIN evaluation_assignments ea ON ir.id = ea.request_id
-        LEFT JOIN users ev ON ea.evaluator_id = ev.id
-        WHERE ir.id = ?
-    ''', (request_id,)).fetchone()
-    
-    inspection_details = conn.execute('''
-        SELECT * FROM inspection_details WHERE request_id = ? ORDER BY sequence
-    ''', (request_id,)).fetchall()
-    
-    response = conn.execute('''
-        SELECT * FROM evaluation_responses WHERE request_id = ? LIMIT 1
-    ''', (request_id,)).fetchone()
-    
-    response_details = []
-    if response:
-        response_details = conn.execute('''
-            SELECT * FROM evaluation_response_details WHERE response_id = ? ORDER BY sequence
-        ''', (response['id'],)).fetchall()
-    
-    conn.close()
-    
-    return render_template('admin/inspection_details.html', 
-                         request_info=request_info,
-                         inspection_details=inspection_details,
-                         response_details=response_details,
-                         response=response)
 
-@app.route('/admin/inspections/<int:request_id>/details/save', methods=['POST'])
-@admin_required
-def admin_inspection_details_save(request_id):
-    """검수신청 상세내역 저장"""
-    data = request.get_json()
-    details = data.get('details', [])
-    
-    conn = get_db_connection()
-    try:
-        for detail in details:
-            # 검수신청내역 업데이트
-            if detail.get('detail_id'):
-                conn.execute('''
-                    UPDATE inspection_details SET content = ? WHERE id = ?
-                ''', (detail.get('inspection_content', ''), detail['detail_id']))
-            
-            # 평가답변내역 업데이트 또는 생성
-            if detail.get('response_id'):
-                conn.execute('''
-                    UPDATE evaluation_response_details 
-                    SET content = ?, note = ? WHERE id = ?
-                ''', (detail.get('response_content', ''), detail.get('response_note', ''), detail['response_id']))
-            elif detail.get('response_content'):
-                # 새로운 답변 생성
-                response = conn.execute('''
-                    SELECT id FROM evaluation_responses WHERE request_id = ? LIMIT 1
-                ''', (request_id,)).fetchone()
-                
-                if response:
-                    conn.execute('''
-                        INSERT INTO evaluation_response_details (response_id, sequence, content, note)
-                        VALUES (?, ?, ?, ?)
-                    ''', (response['id'], detail['sequence'], detail.get('response_content', ''), detail.get('response_note', '')))
-        
-        conn.commit()
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-    finally:
-        conn.close()
+@app.route("/admin/diagnosis")
+@login_required
+@role_required("관리자")
+def admin_diagnosis():
+    clause, params = _filter_clause("dr.request_date")
+    db = get_db()
+    rows = db.execute(
+        f"""
+        SELECT dr.*, applicant.name AS applicant_name, evaluator.name AS evaluator_name
+        FROM diagnosis_requests dr
+        JOIN users applicant ON applicant.id = dr.applicant_id
+        LEFT JOIN users evaluator ON evaluator.id = dr.evaluator_id
+        WHERE 1=1 {clause}
+        ORDER BY dr.request_date DESC
+        """,
+        params,
+    ).fetchall()
 
-@app.route('/admin/inspections/<int:request_id>/export/excel')
-@admin_required
-def admin_inspection_export_excel(request_id):
-    """검수신청 상세 엑셀 내보내기"""
-    conn = get_db_connection()
-    request_info = conn.execute('''
-        SELECT ir.*, u.name as user_name, ev.name as evaluator_name
-        FROM inspection_requests ir
-        LEFT JOIN users u ON ir.user_id = u.id
-        LEFT JOIN evaluation_assignments ea ON ir.id = ea.request_id
-        LEFT JOIN users ev ON ea.evaluator_id = ev.id
-        WHERE ir.id = ?
-    ''', (request_id,)).fetchone()
-    
-    inspection_details = conn.execute('''
-        SELECT * FROM inspection_details WHERE request_id = ? ORDER BY sequence
-    ''', (request_id,)).fetchall()
-    
-    response = conn.execute('''
-        SELECT * FROM evaluation_responses WHERE request_id = ? LIMIT 1
-    ''', (request_id,)).fetchone()
-    
-    response_details = []
-    if response:
-        response_details = conn.execute('''
-            SELECT * FROM evaluation_response_details WHERE response_id = ? ORDER BY sequence
-        ''', (response['id'],)).fetchall()
-    
-    conn.close()
-    
-    # 엑셀 데이터 준비
-    headers = ['순', '검수신청내역', '답변내역', '비고']
-    data = []
-    for detail in inspection_details:
-        resp_detail = next((r for r in response_details if r['sequence'] == detail['sequence']), None)
-        data.append([
-            detail['sequence'],
-            detail['content'],
-            resp_detail['content'] if resp_detail else '',
-            resp_detail['note'] if resp_detail and resp_detail['note'] else ''
-        ])
-    
-    filename = f"{request_info['vehicle_number'] or 'inspection'}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    export_to_excel(data, headers, filename)
-    return send_file(filename, as_attachment=True)
+    enriched = []
+    for row in rows:
+        details = _fetch_request_details(row["id"])
+        responses = _fetch_response_details(row["id"])
+        enriched.append(
+            {
+                "row": row,
+                "request_summary": _summarize_details(details, "content"),
+                "response_summary": _summarize_details(responses, "content"),
+            }
+        )
 
-@app.route('/admin/inspections/<int:request_id>/export/pdf')
-@admin_required
-def admin_inspection_export_pdf(request_id):
-    """검수신청 상세 PDF 내보내기"""
-    conn = get_db_connection()
-    request_info = conn.execute('''
-        SELECT ir.*, u.name as user_name, ev.name as evaluator_name
-        FROM inspection_requests ir
-        LEFT JOIN users u ON ir.user_id = u.id
-        LEFT JOIN evaluation_assignments ea ON ir.id = ea.request_id
-        LEFT JOIN users ev ON ea.evaluator_id = ev.id
-        WHERE ir.id = ?
-    ''', (request_id,)).fetchone()
-    
-    inspection_details = conn.execute('''
-        SELECT * FROM inspection_details WHERE request_id = ? ORDER BY sequence
-    ''', (request_id,)).fetchall()
-    
-    response = conn.execute('''
-        SELECT * FROM evaluation_responses WHERE request_id = ? LIMIT 1
-    ''', (request_id,)).fetchone()
-    
-    response_details = []
-    if response:
-        response_details = conn.execute('''
-            SELECT * FROM evaluation_response_details WHERE response_id = ? ORDER BY sequence
-        ''', (response['id'],)).fetchall()
-    
-    conn.close()
-    
-    # PDF 데이터 준비
-    headers = ['순', '검수신청내역', '답변내역', '비고']
-    data = []
-    for detail in inspection_details:
-        resp_detail = next((r for r in response_details if r['sequence'] == detail['sequence']), None)
-        data.append([
-            str(detail['sequence']),
-            detail['content'],
-            resp_detail['content'] if resp_detail else '',
-            resp_detail['note'] if resp_detail and resp_detail['note'] else ''
-        ])
-    
-    filename = f"{request_info['vehicle_number'] or 'inspection'}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-    export_to_pdf(data, headers, filename, title=f"검수신청 상세 - {request_info['vehicle_number'] or ''}")
-    return send_file(filename, as_attachment=True)
+    # 평가사 목록 가져오기
+    evaluators = db.execute(
+        "SELECT id, name, email FROM users WHERE user_type = '평가사' ORDER BY name"
+    ).fetchall()
 
-@app.route('/admin/inspections/<int:request_id>/translate')
-@admin_required
-def admin_inspection_translate(request_id):
-    """번역 페이지"""
-    conn = get_db_connection()
-    request_info = conn.execute('''
-        SELECT ir.*, u.name as user_name, ev.name as evaluator_name
-        FROM inspection_requests ir
-        LEFT JOIN users u ON ir.user_id = u.id
-        LEFT JOIN evaluation_assignments ea ON ir.id = ea.request_id
-        LEFT JOIN users ev ON ea.evaluator_id = ev.id
-        WHERE ir.id = ?
-    ''', (request_id,)).fetchone()
-    
-    inspection_details = conn.execute('''
-        SELECT * FROM inspection_details WHERE request_id = ? ORDER BY sequence
-    ''', (request_id,)).fetchall()
-    
-    response = conn.execute('''
-        SELECT * FROM evaluation_responses WHERE request_id = ? LIMIT 1
-    ''', (request_id,)).fetchone()
-    
-    response_details = []
-    if response:
-        response_details = conn.execute('''
-            SELECT * FROM evaluation_response_details WHERE response_id = ? ORDER BY sequence
-        ''', (response['id'],)).fetchall()
-    
-    conn.close()
-    
-    return render_template('admin/inspection_translate.html', 
-                         request_info=request_info,
-                         inspection_details=inspection_details,
-                         response_details=response_details,
-                         response=response)
+    start_date = request.args.get("start_date", "")
+    end_date = request.args.get("end_date", "")
+    return render_template(
+        "admin/diagnosis.html",
+        diagnoses=enriched,
+        evaluators=evaluators,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
-@app.route('/admin/inspections/<int:request_id>/send', methods=['POST'])
-@admin_required
-def admin_inspection_send(request_id):
-    """검수 결과 전송"""
-    conn = get_db_connection()
-    try:
-        conn.execute('''
-            UPDATE inspection_requests SET sent_date = CURRENT_TIMESTAMP WHERE id = ?
-        ''', (request_id,))
-        conn.execute('''
-            UPDATE evaluation_responses SET sent_date = CURRENT_TIMESTAMP WHERE request_id = ?
-        ''', (request_id,))
-        conn.commit()
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-    finally:
-        conn.close()
 
-@app.route('/admin/inspections/export/excel')
-@admin_required
-def admin_inspections_export_excel():
-    """검수신청 엑셀 내보내기"""
-    start_date = request.args.get('start_date', '')
-    end_date = request.args.get('end_date', '')
-    
-    conn = get_db_connection()
-    query = '''
-        SELECT ir.request_date, ir.vehicle_number, ir.lot_number, ir.parking_number,
-               GROUP_CONCAT(id.content, '/') as inspection_contents,
-               GROUP_CONCAT(erd.content, '/') as response_contents,
-               er.response_date, ir.sent_date
-        FROM inspection_requests ir
-        LEFT JOIN inspection_details id ON ir.id = id.request_id
-        LEFT JOIN evaluation_responses er ON ir.id = er.request_id
-        LEFT JOIN evaluation_response_details erd ON er.id = erd.response_id
-    '''
-    
-    conditions = []
-    if start_date:
-        conditions.append(f"DATE(ir.request_date) >= '{start_date}'")
-    if end_date:
-        conditions.append(f"DATE(ir.request_date) <= '{end_date}'")
-    
-    if conditions:
-        query += ' WHERE ' + ' AND '.join(conditions)
-    
-    query += ' GROUP BY ir.id ORDER BY ir.request_date DESC'
-    
-    inspections = conn.execute(query).fetchall()
-    conn.close()
-    
-    headers = ['신청일', '차량번호', '출품번호', '주차번호', '검수신청', '평가답변', '답변일', '전송일']
-    data = []
-    for row in inspections:
-        data.append([
-            format_datetime(row['request_date']),
-            row['vehicle_number'] or '',
-            row['lot_number'] or '',
-            row['parking_number'] or '',
-            row['inspection_contents'] or '',
-            row['response_contents'] or '',
-            format_datetime(row['response_date']),
-            format_datetime(row['sent_date'])
-        ])
-    
-    filename = f'inspections_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
-    export_to_excel(data, headers, filename)
-    return send_file(filename, as_attachment=True)
+@app.route("/admin/diagnosis/<int:diagnosis_id>")
+@login_required
+@role_required("관리자")
+def admin_diagnosis_details(diagnosis_id: int):
+    diagnosis = _fetch_diagnosis(diagnosis_id)
+    if not diagnosis:
+        abort(404)
+    details = _fetch_request_details(diagnosis_id)
+    responses = _fetch_response_details(diagnosis_id)
+    return render_template(
+        "admin/diagnosis_details.html",
+        diagnosis=diagnosis,
+        request_details=details,
+        response_details=responses,
+    )
 
-@app.route('/admin/inspections/export/pdf')
-@admin_required
-def admin_inspections_export_pdf():
-    """검수신청 PDF 내보내기"""
-    start_date = request.args.get('start_date', '')
-    end_date = request.args.get('end_date', '')
-    
-    conn = get_db_connection()
-    query = '''
-        SELECT ir.request_date, ir.vehicle_number, ir.lot_number, ir.parking_number,
-               GROUP_CONCAT(id.content, '/') as inspection_contents,
-               GROUP_CONCAT(erd.content, '/') as response_contents,
-               er.response_date, ir.sent_date
-        FROM inspection_requests ir
-        LEFT JOIN inspection_details id ON ir.id = id.request_id
-        LEFT JOIN evaluation_responses er ON ir.id = er.request_id
-        LEFT JOIN evaluation_response_details erd ON er.id = erd.response_id
-    '''
-    
-    conditions = []
-    if start_date:
-        conditions.append(f"DATE(ir.request_date) >= '{start_date}'")
-    if end_date:
-        conditions.append(f"DATE(ir.request_date) <= '{end_date}'")
-    
-    if conditions:
-        query += ' WHERE ' + ' AND '.join(conditions)
-    
-    query += ' GROUP BY ir.id ORDER BY ir.request_date DESC'
-    
-    inspections = conn.execute(query).fetchall()
-    conn.close()
-    
-    headers = ['신청일', '차량번호', '출품번호', '주차번호', '검수신청', '평가답변', '답변일', '전송일']
-    data = []
-    for row in inspections:
-        data.append([
-            format_datetime(row['request_date']),
-            row['vehicle_number'] or '',
-            row['lot_number'] or '',
-            row['parking_number'] or '',
-            row['inspection_contents'] or '',
-            row['response_contents'] or '',
-            format_datetime(row['response_date']),
-            format_datetime(row['sent_date'])
-        ])
-    
-    filename = f'inspections_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
-    export_to_pdf(data, headers, filename)
-    return send_file(filename, as_attachment=True)
 
-@app.route('/admin/settlements')
-@admin_required
-def admin_settlements():
-    """정산관리 페이지"""
-    start_date = request.args.get('start_date', '')
-    end_date = request.args.get('end_date', '')
+@app.route("/admin/diagnosis/<int:diagnosis_id>/json")
+@login_required
+def admin_diagnosis_details_json(diagnosis_id: int):
+    """진단신청 상세 정보를 JSON으로 반환 (관리자 및 본인 신청건만 접근 가능)"""
+    diagnosis = _fetch_diagnosis(diagnosis_id)
+    if not diagnosis:
+        return jsonify(success=False, message="진단신청을 찾을 수 없습니다."), 404
     
-    conn = get_db_connection()
+    # 권한 체크: 관리자이거나 본인이 신청한 건만 접근 가능
+    user = current_user()
+    if user["user_type"] != "관리자" and diagnosis["applicant_id"] != user["id"]:
+        return jsonify(success=False, message="접근 권한이 없습니다."), 403
     
-    # 저장된 정산내역 목록
-    saved_settlements = conn.execute('''
-        SELECT * FROM saved_settlements ORDER BY created_at DESC
-    ''').fetchall()
+    details = _fetch_request_details(diagnosis_id)
+    responses = _fetch_response_details(diagnosis_id)
     
-    settlements = []
-    settlements_with_totals = []
-    if start_date and end_date:
-        query = '''
-            SELECT DATE(er.response_date) as settlement_date, 
-                   ev.id as evaluator_id, ev.name as evaluator_name,
-                   COUNT(DISTINCT er.id) as count,
-                   COUNT(DISTINCT er.id) * 10000 as amount,
-                   COUNT(DISTINCT er.id) * 1000 as vat,
-                   COUNT(DISTINCT er.id) * 11000 as total_amount
-            FROM evaluation_responses er
-            JOIN evaluation_assignments ea ON er.request_id = ea.request_id AND er.evaluator_id = ea.evaluator_id
-            JOIN users ev ON er.evaluator_id = ev.id
-            WHERE DATE(er.response_date) >= ? AND DATE(er.response_date) <= ?
-            GROUP BY DATE(er.response_date), ev.id
-            ORDER BY settlement_date, ev.name
-        '''
-        settlements = conn.execute(query, (start_date, end_date)).fetchall()
-        
-        # 소계 및 합계 계산
-        current_date = None
-        date_totals = {}
-        grand_totals = {'count': 0, 'amount': 0, 'vat': 0, 'total_amount': 0}
-        
-        for settlement in settlements:
-            settlement_dict = dict(settlement)
-            settlement_date = settlement_dict['settlement_date']
-            
-            if current_date != settlement_date:
-                if current_date is not None:
-                    # 이전 날짜의 소계 추가
-                    settlements_with_totals.append({
-                        'type': 'subtotal',
-                        'date': current_date,
-                        **date_totals[current_date]
-                    })
-                current_date = settlement_date
-                if settlement_date not in date_totals:
-                    date_totals[settlement_date] = {'count': 0, 'amount': 0, 'vat': 0, 'total_amount': 0}
-            
-            settlements_with_totals.append({
-                'type': 'data',
-                **settlement_dict
-            })
-            
-            # 날짜별 합계
-            date_totals[settlement_date]['count'] += settlement_dict['count']
-            date_totals[settlement_date]['amount'] += settlement_dict['amount']
-            date_totals[settlement_date]['vat'] += settlement_dict['vat']
-            date_totals[settlement_date]['total_amount'] += settlement_dict['total_amount']
-            
-            # 전체 합계
-            grand_totals['count'] += settlement_dict['count']
-            grand_totals['amount'] += settlement_dict['amount']
-            grand_totals['vat'] += settlement_dict['vat']
-            grand_totals['total_amount'] += settlement_dict['total_amount']
-        
-        # 마지막 날짜의 소계 추가
-        if current_date is not None:
-            settlements_with_totals.append({
-                'type': 'subtotal',
-                'date': current_date,
-                **date_totals[current_date]
-            })
-        
-        # 전체 합계 추가
-        settlements_with_totals.append({
-            'type': 'grandtotal',
-            **grand_totals
+    # 응답을 시퀀스별로 매핑
+    response_map = {resp["sequence"]: resp for resp in responses}
+    
+    # 테이블 데이터 구성
+    table_data = []
+    for detail in details:
+        resp = response_map.get(detail["sequence"])
+        table_data.append({
+            "sequence": detail["sequence"],
+            "request_content": detail["content"],
+            "response_content": resp["content"] if resp else "",
+            "note": resp["note"] if resp else "",
         })
     
-    conn.close()
-    
-    return render_template('admin/settlements.html', 
-                         settlements=settlements_with_totals, 
-                         saved_settlements=saved_settlements,
-                         start_date=start_date, 
-                         end_date=end_date)
+    return jsonify(
+        success=True,
+        diagnosis={
+            "id": diagnosis["id"],
+            "request_date": diagnosis["request_date"],
+            "vehicle_number": diagnosis["vehicle_number"] or "",
+            "lot_number": diagnosis["lot_number"] or "",
+            "parking_number": diagnosis["parking_number"] or "",
+            "evaluator_name": diagnosis["evaluator_name"] or "",
+            "status": diagnosis["status"],
+            "confirmed_at": diagnosis["confirmed_at"] or "",
+        },
+        table_data=table_data,
+    )
 
-@app.route('/admin/settlements/save', methods=['POST'])
-@admin_required
+
+@app.route("/admin/diagnosis/<int:diagnosis_id>/confirm", methods=["POST"])
+@login_required
+@role_required("관리자")
+def admin_diagnosis_confirm(diagnosis_id: int):
+    if not _fetch_diagnosis(diagnosis_id):
+        abort(404)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db = get_db()
+    db.execute(
+        "UPDATE diagnosis_requests SET confirmed_at = ? WHERE id = ?",
+        (now, diagnosis_id),
+    )
+    db.commit()
+    return jsonify(success=True, confirmed_at=now)
+
+
+@app.route("/admin/diagnosis/<int:diagnosis_id>/translate")
+@login_required
+@role_required("관리자")
+def admin_diagnosis_translate(diagnosis_id: int):
+    diagnosis = _fetch_diagnosis(diagnosis_id)
+    if not diagnosis:
+        abort(404)
+    details = _fetch_request_details(diagnosis_id)
+    responses = _fetch_response_details(diagnosis_id)
+
+    # 헤더 정보 번역
+    header_translations = {}
+    if diagnosis.get('vehicle_number'):
+        header_translations['vehicle_number'] = translate_to_japanese(f"차량번호: {diagnosis['vehicle_number']}")
+    if diagnosis.get('lot_number'):
+        header_translations['lot_number'] = translate_to_japanese(f"출품번호: {diagnosis['lot_number']}")
+    if diagnosis.get('parking_number'):
+        header_translations['parking_number'] = translate_to_japanese(f"주차번호: {diagnosis['parking_number']}")
+    if diagnosis.get('evaluator_name'):
+        header_translations['evaluator_name'] = translate_to_japanese(f"평가사명: {diagnosis['evaluator_name']}")
+
+    # 표 형식으로 번역 데이터 구성
+    translated_table_data = []
+    response_map = {resp['sequence']: resp for resp in responses}
+    
+    for detail in details:
+        resp = response_map.get(detail['sequence'])
+        # 각 항목 번역
+        translated_request = translate_to_japanese(detail['content']) if detail['content'] else ""
+        translated_response = translate_to_japanese(resp['content']) if resp and resp.get('content') else ""
+        translated_note = translate_to_japanese(resp['note']) if resp and resp.get('note') else ""
+        
+        translated_table_data.append({
+            'sequence': detail['sequence'],
+            'request_content': translated_request,
+            'response_content': translated_response,
+            'note': translated_note,
+        })
+
+    db = get_db()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # 번역된 내용을 저장 (표 형식 유지를 위해 JSON 형태로 저장)
+    translated_data = {
+        'headers': header_translations,
+        'table_data': translated_table_data,
+    }
+    translated_summary = json.dumps(translated_data, ensure_ascii=False)
+    
+    db.execute(
+        """
+        UPDATE diagnosis_requests
+        SET translated_summary = ?, translated_at = ?
+        WHERE id = ?
+        """,
+        (translated_summary, now, diagnosis_id),
+    )
+    db.commit()
+
+    return render_template(
+        "admin/diagnosis_translate.html",
+        diagnosis=diagnosis,
+        translated_headers=header_translations,
+        translated_table_data=translated_table_data,
+        generated_at=now,
+    )
+
+
+@app.route("/admin/diagnosis/<int:diagnosis_id>/send", methods=["POST"])
+@login_required
+@role_required("관리자")
+def admin_diagnosis_send(diagnosis_id: int):
+    diagnosis = _fetch_diagnosis(diagnosis_id)
+    if not diagnosis:
+        abort(404)
+
+    db = get_db()
+    applicant = db.execute("SELECT * FROM users WHERE id = ?", (diagnosis["applicant_id"],)).fetchone()
+    if not applicant or not applicant["email"]:
+        return jsonify(success=False, message="회원의 이메일 주소가 없습니다.")
+
+    translated_summary = diagnosis["translated_summary"] or ""
+    if not translated_summary:
+        return jsonify(success=False, message="번역된 내용이 없습니다. 먼저 번역을 진행해주세요.")
+
+    # JSON 형태로 저장된 번역 데이터 파싱
+    try:
+        translated_data = json.loads(translated_summary)
+        translated_headers = translated_data.get('headers', {})
+        translated_table_data = translated_data.get('table_data', [])
+    except:
+        # 기존 형식 호환성 유지
+        translated_headers = {}
+        translated_table_data = []
+        translated_text = translated_summary
+    else:
+        # 표 형식으로 HTML 생성
+        header_html = ""
+        if translated_headers.get('vehicle_number'):
+            header_html += f"<p><strong>{translated_headers['vehicle_number']}</strong></p>"
+        if translated_headers.get('lot_number'):
+            header_html += f"<p><strong>{translated_headers['lot_number']}</strong></p>"
+        if translated_headers.get('parking_number'):
+            header_html += f"<p><strong>{translated_headers['parking_number']}</strong></p>"
+        if translated_headers.get('evaluator_name'):
+            header_html += f"<p><strong>{translated_headers['evaluator_name']}</strong></p>"
+        
+        table_html = "<table border='1' cellpadding='5' cellspacing='0' style='border-collapse: collapse; width: 100%;'>"
+        table_html += "<thead><tr style='background-color: #366092; color: white;'><th>順</th><th>診断申請内容</th><th>回答</th><th>備考</th></tr></thead>"
+        table_html += "<tbody>"
+        for row in translated_table_data:
+            table_html += f"<tr>"
+            table_html += f"<td>{row.get('sequence', '')}</td>"
+            table_html += f"<td>{row.get('request_content', '')}</td>"
+            table_html += f"<td>{row.get('response_content', '')}</td>"
+            table_html += f"<td>{row.get('note', '')}</td>"
+            table_html += f"</tr>"
+        table_html += "</tbody></table>"
+        translated_text = header_html + table_html
+
+    subject = f"진단 결과 - {diagnosis['vehicle_number'] or '차량번호 없음'}"
+    body_html = f"""
+    <html>
+    <body>
+        <h2>위카아라이 진단 결과</h2>
+        <p>안녕하세요, {applicant['name']}님</p>
+        <p>진단 신청 결과를 전송드립니다.</p>
+        <hr>
+        {translated_text}
+        <hr>
+        <p>위카모빌리티 주식회사</p>
+    </body>
+    </html>
+    """
+
+    if send_email(applicant["email"], subject, body_html):
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        db.execute(
+            "UPDATE diagnosis_requests SET sent_at = ?, status = '전송완료' WHERE id = ?",
+            (now, diagnosis_id),
+        )
+        db.commit()
+        return jsonify(success=True, sent_at=now)
+    else:
+        return jsonify(success=False, message="이메일 전송에 실패했습니다.")
+
+
+@app.route("/admin/diagnosis/<int:diagnosis_id>/detail/export/<string:fmt>")
+@login_required
+@role_required("관리자")
+def admin_diagnosis_detail_export(diagnosis_id: int, fmt: str):
+    if fmt not in ("xlsx", "pdf"):
+        abort(404)
+    diagnosis = _fetch_diagnosis(diagnosis_id)
+    if not diagnosis:
+        abort(404)
+    details = _fetch_request_details(diagnosis_id)
+    responses = _fetch_response_details(diagnosis_id)
+    headers = ["순", "진단신청내역", "답변내역", "비고"]
+    data = []
+    response_map = {resp["sequence"]: resp for resp in responses}
+    for detail in details:
+        resp = response_map.get(detail["sequence"])
+        data.append(
+            [
+                detail["sequence"],
+                detail["content"],
+                resp["content"] if resp else "",
+                resp["note"] if resp else "",
+            ]
+        )
+    safe_vehicle = (diagnosis["vehicle_number"] or f"diagnosis_{diagnosis_id}").replace(" ", "_")
+    filename = EXPORT_DIR / f"{safe_vehicle}_detail.{fmt}"
+    if fmt == "xlsx":
+        export_to_excel(data, headers, filename)
+    else:
+        export_to_pdf(data, headers, filename, title="진단신청 상세")
+    return send_file(filename, as_attachment=True)
+
+
+def _collect_admin_export_rows(start_date: str, end_date: str) -> List[sqlite3.Row]:
+    db = get_db()
+    clause = "WHERE date(dr.request_date) BETWEEN date(?) AND date(?)"
+    return db.execute(
+        f"""
+        SELECT dr.*, applicant.name AS applicant_name, evaluator.name AS evaluator_name
+        FROM diagnosis_requests dr
+        JOIN users applicant ON applicant.id = dr.applicant_id
+        LEFT JOIN users evaluator ON evaluator.id = dr.evaluator_id
+        {clause}
+        ORDER BY dr.request_date DESC
+        """,
+        (start_date, end_date),
+    ).fetchall()
+
+
+@app.route("/admin/diagnosis/export/<string:fmt>")
+@login_required
+@role_required("관리자")
+def admin_diagnosis_export(fmt: str):
+    if fmt not in ("xlsx", "pdf"):
+        abort(404)
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    if not start_date or not end_date:
+        return redirect(url_for("admin_diagnosis"))
+
+    rows = _collect_admin_export_rows(start_date, end_date)
+    headers = [
+        "순",
+        "신청일",
+        "상태",
+        "차량번호",
+        "출품번호",
+        "주차번호",
+        "진단신청",
+        "답변일",
+        "답변",
+        "평가사",
+        "확인일",
+        "전송일",
+    ]
+    data = []
+    for idx, row in enumerate(rows, 1):
+        details = _fetch_request_details(row["id"])
+        responses = _fetch_response_details(row["id"])
+        data.append(
+            [
+                idx,
+                row["request_date"],
+                row["status"],
+                row["vehicle_number"],
+                row["lot_number"],
+                row["parking_number"],
+                _summarize_details(details, "content"),
+                row["answer_date"] or "",
+                _summarize_details(responses, "content"),
+                row["evaluator_name"] or row["evaluator_name"] or "",
+                row["confirmed_at"] or "",
+                row["sent_at"] or "",
+            ]
+        )
+    filename = EXPORT_DIR / f"admin_diagnosis_{start_date}_{end_date}.{fmt}"
+    if fmt == "xlsx":
+        export_to_excel(data, headers, filename)
+    else:
+        export_to_pdf(data, headers, filename, title="진단신청관리")
+    return send_file(filename, as_attachment=True)
+
+
+def _aggregate_settlement_rows(year: int, month: int) -> Dict[str, Any]:
+    db = get_db()
+    start_date = f"{year}-{month:02d}-01"
+    if month == 12:
+        end_date = f"{year + 1}-01-01"
+    else:
+        end_date = f"{year}-{month + 1:02d}-01"
+
+    rows = db.execute(
+        """
+        SELECT date(dr.answer_date) AS answer_day,
+               COALESCE(evaluator.name, dr.evaluator_name) AS evaluator_name,
+               COUNT(*) AS cnt,
+               SUM(COALESCE(dr.fee, 0)) AS amount
+        FROM diagnosis_requests dr
+        LEFT JOIN users evaluator ON evaluator.id = dr.evaluator_id
+        WHERE dr.answer_date IS NOT NULL
+          AND dr.status = '답변완료'
+          AND date(dr.answer_date) >= date(?)
+          AND date(dr.answer_date) < date(?)
+        GROUP BY answer_day, evaluator_name
+        ORDER BY answer_day ASC, evaluator_name ASC
+        """,
+        (start_date, end_date),
+    ).fetchall()
+
+    grouped: Dict[str, Dict[str, Any]] = {}
+    total_amount = 0
+    total_count = 0
+
+    for row in rows:
+        day = row["answer_day"]
+        evaluator_name = row["evaluator_name"] or "미지정"
+        if day not in grouped:
+            grouped[day] = {
+                "rows": [],
+                "subtotal_count": 0,
+                "subtotal_amount": 0,
+            }
+        vat = int(row["amount"] * 0.1) if row["amount"] else 0
+        grand = (row["amount"] or 0) + vat
+        grouped[day]["rows"].append(
+            {
+                "evaluator_name": evaluator_name,
+                "count": row["cnt"],
+                "amount": row["amount"] or 0,
+                "vat": vat,
+                "grand": grand,
+            }
+        )
+        grouped[day]["subtotal_count"] += row["cnt"]
+        grouped[day]["subtotal_amount"] += row["amount"] or 0
+        total_amount += row["amount"] or 0
+        total_count += row["cnt"]
+
+    total_vat = int(total_amount * 0.1)
+    payload = {
+        "days": grouped,
+        "total_count": total_count,
+        "total_amount": total_amount,
+        "total_vat": total_vat,
+        "total_grand": total_amount + total_vat,
+    }
+    return payload
+
+
+@app.route("/admin/settlements")
+@login_required
+@role_required("관리자")
+def admin_settlements():
+    year = request.args.get("year", type=int)
+    month = request.args.get("month", type=int)
+    if not year or not month:
+        now = datetime.now()
+        year = now.year
+        month = now.month
+
+    payload = _aggregate_settlement_rows(year, month)
+    db = get_db()
+    saved = db.execute(
+        "SELECT * FROM settlements WHERE year = ? AND month = ? ORDER BY created_at DESC",
+        (year, month),
+    ).fetchall()
+    return render_template(
+        "admin/settlements.html",
+        year=year,
+        month=month,
+        payload=payload,
+        saved_settlements=saved,
+    )
+
+
+@app.route("/admin/settlements/save", methods=["POST"])
+@login_required
+@role_required("관리자")
 def admin_settlements_save():
-    """정산내역 저장"""
-    data = request.get_json()
-    start_date = data.get('start_date')
-    end_date = data.get('end_date')
-    settlement_data = data.get('data')
-    
-    conn = get_db_connection()
-    try:
-        name = f"{start_date}_{end_date}"
-        conn.execute('''
-            INSERT INTO saved_settlements (name, start_date, end_date, data)
-            VALUES (?, ?, ?, ?)
-        ''', (name, start_date, end_date, json.dumps(settlement_data)))
-        conn.commit()
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-    finally:
-        conn.close()
+    year = request.form.get("year", type=int)
+    month = request.form.get("month", type=int)
+    if not year or not month:
+        return redirect(url_for("admin_settlements"))
 
-@app.route('/admin/settlements/<int:settlement_id>')
-@admin_required
-def admin_settlement_view(settlement_id):
-    """저장된 정산내역 보기"""
-    conn = get_db_connection()
-    settlement = conn.execute('''
-        SELECT * FROM saved_settlements WHERE id = ?
-    ''', (settlement_id,)).fetchone()
-    conn.close()
-    
-    if settlement:
-        data = json.loads(settlement['data'])
-        return render_template('admin/settlement_view.html', 
-                             settlement=settlement, 
-                             data=data)
-    return redirect(url_for('admin_settlements'))
+    start_date = f"{year}-{month:02d}-01"
+    if month == 12:
+        end_date = f"{year + 1}-01-01"
+    else:
+        end_date = f"{year}-{month + 1:02d}-01"
 
-@app.route('/admin/settlements/export/excel')
-@admin_required
-def admin_settlements_export_excel():
-    """정산관리 엑셀 내보내기"""
-    start_date = request.args.get('start_date', '')
-    end_date = request.args.get('end_date', '')
-    
-    if not start_date or not end_date:
-        return jsonify({'success': False, 'message': '시작일과 종료일을 입력해주세요.'})
-    
-    conn = get_db_connection()
-    query = '''
-        SELECT DATE(er.response_date) as settlement_date, 
-               ev.name as evaluator_name,
-               COUNT(DISTINCT er.id) as count,
-               COUNT(DISTINCT er.id) * 10000 as amount,
-               COUNT(DISTINCT er.id) * 1000 as vat,
-               COUNT(DISTINCT er.id) * 11000 as total_amount
-        FROM evaluation_responses er
-        JOIN evaluation_assignments ea ON er.request_id = ea.request_id AND er.evaluator_id = ea.evaluator_id
-        JOIN users ev ON er.evaluator_id = ev.id
-        WHERE DATE(er.response_date) >= ? AND DATE(er.response_date) <= ?
-        GROUP BY DATE(er.response_date), ev.id
-        ORDER BY settlement_date, ev.name
-    '''
-    settlements = conn.execute(query, (start_date, end_date)).fetchall()
-    conn.close()
-    
-    headers = ['일자', '평가사', '건수', '금액', 'VAT', '청구액']
-    data = []
-    current_date = None
-    date_totals = {'count': 0, 'amount': 0, 'vat': 0, 'total_amount': 0}
-    grand_totals = {'count': 0, 'amount': 0, 'vat': 0, 'total_amount': 0}
-    
-    for settlement in settlements:
-        settlement_date = settlement['settlement_date']
-        
-        if current_date != settlement_date:
-            if current_date is not None:
-                data.append(['소계 (' + current_date + ')', '', date_totals['count'], 
-                           date_totals['amount'], date_totals['vat'], date_totals['total_amount']])
-                date_totals = {'count': 0, 'amount': 0, 'vat': 0, 'total_amount': 0}
-            current_date = settlement_date
-        
-        data.append([
-            settlement_date,
-            settlement['evaluator_name'],
-            settlement['count'],
-            settlement['amount'],
-            settlement['vat'],
-            settlement['total_amount']
-        ])
-        
-        date_totals['count'] += settlement['count']
-        date_totals['amount'] += settlement['amount']
-        date_totals['vat'] += settlement['vat']
-        date_totals['total_amount'] += settlement['total_amount']
-        
-        grand_totals['count'] += settlement['count']
-        grand_totals['amount'] += settlement['amount']
-        grand_totals['vat'] += settlement['vat']
-        grand_totals['total_amount'] += settlement['total_amount']
-    
-    if current_date is not None:
-        data.append(['소계 (' + current_date + ')', '', date_totals['count'], 
-                   date_totals['amount'], date_totals['vat'], date_totals['total_amount']])
-    
-    data.append(['합계', '', grand_totals['count'], grand_totals['amount'], 
-                grand_totals['vat'], grand_totals['total_amount']])
-    
-    filename = f'settlements_{start_date}_{end_date}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
-    export_to_excel(data, headers, filename)
+    payload = _aggregate_settlement_rows(year, month)
+    title = f"{year}년 {month}월"
+    settlement_id = save_settlement_payload(year, month, title, start_date, end_date, payload)
+    return redirect(url_for("admin_settlement_view", settlement_id=settlement_id))
+
+
+@app.route("/admin/settlements/<int:settlement_id>")
+@login_required
+@role_required("관리자")
+def admin_settlement_view(settlement_id: int):
+    row = fetch_settlement(settlement_id)
+    if not row:
+        abort(404)
+    payload = json.loads(row["payload"])
+    return render_template(
+        "admin/settlement_view.html",
+        settlement=row,
+        payload=payload,
+    )
+
+
+@app.route("/admin/settlements/export/<string:fmt>")
+@login_required
+@role_required("관리자")
+def admin_settlements_export(fmt: str):
+    if fmt not in ("xlsx", "pdf"):
+        abort(404)
+    year = request.args.get("year", type=int)
+    month = request.args.get("month", type=int)
+    if not year or not month:
+        return redirect(url_for("admin_settlements"))
+
+    payload = _aggregate_settlement_rows(year, month)
+    headers = ["일자", "평가사", "건수", "금액", "VAT", "청구액"]
+    data: List[List[Any]] = []
+    for day, info in payload["days"].items():
+        for row in info["rows"]:
+            data.append(
+                [
+                    day,
+                    row["evaluator_name"],
+                    row["count"],
+                    row["amount"],
+                    row["vat"],
+                    row["grand"],
+                ]
+            )
+        data.append(
+            [
+                day,
+                "소계",
+                info["subtotal_count"],
+                info["subtotal_amount"],
+                int(info["subtotal_amount"] * 0.1),
+                info["subtotal_amount"] + int(info["subtotal_amount"] * 0.1),
+            ]
+        )
+    data.append(
+        [
+            "총합",
+            "",
+            payload["total_count"],
+            payload["total_amount"],
+            payload["total_vat"],
+            payload["total_grand"],
+        ]
+    )
+    filename = EXPORT_DIR / f"settlement_{year}_{month:02d}.{fmt}"
+    if fmt == "xlsx":
+        export_to_excel(data, headers, filename)
+    else:
+        export_to_pdf(data, headers, filename, title="정산내역")
     return send_file(filename, as_attachment=True)
 
-@app.route('/admin/settlements/export/pdf')
-@admin_required
-def admin_settlements_export_pdf():
-    """정산관리 PDF 내보내기"""
-    start_date = request.args.get('start_date', '')
-    end_date = request.args.get('end_date', '')
-    
-    if not start_date or not end_date:
-        return jsonify({'success': False, 'message': '시작일과 종료일을 입력해주세요.'})
-    
-    conn = get_db_connection()
-    query = '''
-        SELECT DATE(er.response_date) as settlement_date, 
-               ev.name as evaluator_name,
-               COUNT(DISTINCT er.id) as count,
-               COUNT(DISTINCT er.id) * 10000 as amount,
-               COUNT(DISTINCT er.id) * 1000 as vat,
-               COUNT(DISTINCT er.id) * 11000 as total_amount
-        FROM evaluation_responses er
-        JOIN evaluation_assignments ea ON er.request_id = ea.request_id AND er.evaluator_id = ea.evaluator_id
-        JOIN users ev ON er.evaluator_id = ev.id
-        WHERE DATE(er.response_date) >= ? AND DATE(er.response_date) <= ?
-        GROUP BY DATE(er.response_date), ev.id
-        ORDER BY settlement_date, ev.name
-    '''
-    settlements = conn.execute(query, (start_date, end_date)).fetchall()
-    conn.close()
-    
-    headers = ['일자', '평가사', '건수', '금액', 'VAT', '청구액']
-    data = []
-    current_date = None
-    date_totals = {'count': 0, 'amount': 0, 'vat': 0, 'total_amount': 0}
-    grand_totals = {'count': 0, 'amount': 0, 'vat': 0, 'total_amount': 0}
-    
-    for settlement in settlements:
-        settlement_date = settlement['settlement_date']
-        
-        if current_date != settlement_date:
-            if current_date is not None:
-                data.append(['소계 (' + current_date + ')', '', str(date_totals['count']), 
-                           str(date_totals['amount']), str(date_totals['vat']), str(date_totals['total_amount'])])
-                date_totals = {'count': 0, 'amount': 0, 'vat': 0, 'total_amount': 0}
-            current_date = settlement_date
-        
-        data.append([
-            settlement_date,
-            settlement['evaluator_name'],
-            str(settlement['count']),
-            str(settlement['amount']),
-            str(settlement['vat']),
-            str(settlement['total_amount'])
-        ])
-        
-        date_totals['count'] += settlement['count']
-        date_totals['amount'] += settlement['amount']
-        date_totals['vat'] += settlement['vat']
-        date_totals['total_amount'] += settlement['total_amount']
-        
-        grand_totals['count'] += settlement['count']
-        grand_totals['amount'] += settlement['amount']
-        grand_totals['vat'] += settlement['vat']
-        grand_totals['total_amount'] += settlement['total_amount']
-    
-    if current_date is not None:
-        data.append(['소계 (' + current_date + ')', '', str(date_totals['count']), 
-                   str(date_totals['amount']), str(date_totals['vat']), str(date_totals['total_amount'])])
-    
-    data.append(['합계', '', str(grand_totals['count']), str(grand_totals['amount']), 
-                str(grand_totals['vat']), str(grand_totals['total_amount'])])
-    
-    filename = f'settlements_{start_date}_{end_date}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
-    export_to_pdf(data, headers, filename, title=f"정산관리 ({start_date} ~ {end_date})")
-    return send_file(filename, as_attachment=True)
 
-# 검수신청 페이지
-@app.route('/inspection/dashboard')
-@login_required
-def inspection_dashboard():
-    """검수신청 대시보드"""
-    if session.get('user_type') != '검수신청':
-        return redirect(url_for('dashboard'))
-    return render_template('inspection/dashboard.html')
+# ------------------- 진단신청자 영역 ------------------- #
 
-@app.route('/inspection/request', methods=['GET', 'POST'])
+
+@app.route("/diagnosis/dashboard")
 @login_required
-def inspection_request():
-    """검수신청 페이지"""
-    if session.get('user_type') != '검수신청':
-        return redirect(url_for('dashboard'))
-    
-    if request.method == 'POST':
-        data = request.get_json()
-        vehicle_number = data.get('vehicle_number')
-        lot_number = data.get('lot_number')
-        parking_number = data.get('parking_number')
-        details = data.get('details', [])
-        
-        conn = get_db_connection()
+@role_required("진단신청")
+def diagnosis_dashboard():
+    """진단신청 메인페이지"""
+    return render_template("diagnosis/dashboard.html")
+
+
+@app.route("/diagnosis/request", methods=["GET", "POST"])
+@login_required
+@role_required("진단신청")
+def diagnosis_request():
+    if request.method == "GET":
+        return render_template("diagnosis/request.html")
+
+    vehicle_number = request.form.get("vehicle_number", "").strip()
+    lot_number = request.form.get("lot_number", "").strip()
+    parking_number = request.form.get("parking_number", "").strip()
+
+    sequences = request.form.getlist("detail_sequence")
+    contents = request.form.getlist("detail_content")
+    details: List[Tuple[int, str]] = []
+    for seq_str, content in zip(sequences, contents):
+        content = content.strip()
+        if not content:
+            continue
         try:
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO inspection_requests (user_id, vehicle_number, lot_number, parking_number)
-                VALUES (?, ?, ?, ?)
-            ''', (session['user_id'], vehicle_number, lot_number, parking_number))
-            request_id = cursor.lastrowid
-            
-            for detail in details:
-                cursor.execute('''
-                    INSERT INTO inspection_details (request_id, sequence, content)
-                    VALUES (?, ?, ?)
-                ''', (request_id, detail['sequence'], detail['content']))
-            
-            conn.commit()
-            return jsonify({'success': True, 'message': '검수신청이 완료되었습니다.'})
-        except Exception as e:
-            return jsonify({'success': False, 'message': str(e)})
-        finally:
-            conn.close()
-    
-    return render_template('inspection/request.html')
+            seq = int(seq_str)
+        except ValueError:
+            continue
+        details.append((seq, content))
 
-@app.route('/inspection/history')
+    if not vehicle_number or not details:
+        return render_template(
+            "diagnosis/request.html",
+            error="차량번호와 진단신청내역을 입력해주세요.",
+            vehicle_number=vehicle_number,
+            lot_number=lot_number,
+            parking_number=parking_number,
+            details=details,
+        )
+
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(
+        """
+        INSERT INTO diagnosis_requests (applicant_id, vehicle_number, lot_number, parking_number)
+        VALUES (?, ?, ?, ?)
+        """,
+        (session["user_id"], vehicle_number, lot_number, parking_number),
+    )
+    diagnosis_id = cur.lastrowid
+
+    for seq, content in details:
+        cur.execute(
+            """
+            INSERT INTO diagnosis_request_items (diagnosis_id, sequence, content)
+            VALUES (?, ?, ?)
+            """,
+            (diagnosis_id, seq, content),
+        )
+
+    db.commit()
+    return redirect(url_for("diagnosis_dashboard"))
+
+
+@app.route("/diagnosis/history")
 @login_required
-def inspection_history():
-    """검수신청내역 페이지"""
-    if session.get('user_type') != '검수신청':
-        return redirect(url_for('dashboard'))
-    
-    start_date = request.args.get('start_date', '')
-    end_date = request.args.get('end_date', '')
-    
-    conn = get_db_connection()
-    query = '''
-        SELECT ir.*,
-               GROUP_CONCAT(id.content, '/') as inspection_contents,
-               er.response_date, er.sent_date,
-               GROUP_CONCAT(erd.content, '/') as response_contents
-        FROM inspection_requests ir
-        LEFT JOIN inspection_details id ON ir.id = id.request_id
-        LEFT JOIN evaluation_responses er ON ir.id = er.request_id
-        LEFT JOIN evaluation_response_details erd ON er.id = erd.response_id
-    '''
-    
-    conditions = ['ir.user_id = ?']
-    params = [session['user_id']]
-    
+@role_required("진단신청")
+def diagnosis_history():
+    db = get_db()
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    query = """
+        SELECT * FROM diagnosis_requests
+        WHERE applicant_id = ?
+    """
+    params: List[Any] = [session["user_id"]]
     if start_date:
-        conditions.append("DATE(ir.request_date) >= ?")
+        query += " AND date(request_date) >= date(?)"
         params.append(start_date)
     if end_date:
-        conditions.append("DATE(ir.request_date) <= ?")
+        query += " AND date(request_date) <= date(?)"
         params.append(end_date)
-    
-    if conditions:
-        query += ' WHERE ' + ' AND '.join(conditions)
-    query += ' GROUP BY ir.id ORDER BY ir.request_date DESC'
-    
-    inspections = conn.execute(query, params).fetchall()
-    conn.close()
-    
-    return render_template('inspection/history.html', 
-                         inspections=inspections, 
-                         start_date=start_date, 
-                         end_date=end_date)
+    query += " ORDER BY request_date DESC LIMIT 10"
+    rows = db.execute(query, params).fetchall()
+    enriched = []
+    for row in rows:
+        details = _fetch_request_details(row["id"])
+        responses = _fetch_response_details(row["id"])
+        enriched.append(
+            {
+                "row": row,
+                "request_summary": _summarize_details(details, "content"),
+                "response_summary": _summarize_details(responses, "content"),
+            }
+        )
+    return render_template(
+        "diagnosis/history.html",
+        diagnoses=enriched,
+        start_date=start_date or "",
+        end_date=end_date or "",
+    )
 
-@app.route('/inspection/history/export/excel')
+
+@app.route("/diagnosis/history/export/<string:fmt>")
 @login_required
-def inspection_history_export_excel():
-    """검수신청내역 엑셀 내보내기"""
-    if session.get('user_type') != '검수신청':
-        return redirect(url_for('dashboard'))
-    
-    start_date = request.args.get('start_date', '')
-    end_date = request.args.get('end_date', '')
-    
-    conn = get_db_connection()
-    query = '''
-        SELECT ir.request_date, ir.vehicle_number, ir.lot_number, ir.parking_number,
-               GROUP_CONCAT(id.content, '/') as inspection_contents,
-               GROUP_CONCAT(erd.content, '/') as response_contents,
-               er.response_date
-        FROM inspection_requests ir
-        LEFT JOIN inspection_details id ON ir.id = id.request_id
-        LEFT JOIN evaluation_responses er ON ir.id = er.request_id
-        LEFT JOIN evaluation_response_details erd ON er.id = erd.response_id
-    '''
-    
-    conditions = ['ir.user_id = ?']
-    params = [session['user_id']]
-    
+@role_required("진단신청")
+def diagnosis_history_export(fmt: str):
+    if fmt not in ("xlsx", "pdf"):
+        abort(404)
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    db = get_db()
+    query = """
+        SELECT * FROM diagnosis_requests
+        WHERE applicant_id = ?
+    """
+    params: List[Any] = [session["user_id"]]
     if start_date:
-        conditions.append("DATE(ir.request_date) >= ?")
+        query += " AND date(request_date) >= date(?)"
         params.append(start_date)
     if end_date:
-        conditions.append("DATE(ir.request_date) <= ?")
+        query += " AND date(request_date) <= date(?)"
         params.append(end_date)
-    
-    if conditions:
-        query += ' WHERE ' + ' AND '.join(conditions)
-    query += ' GROUP BY ir.id ORDER BY ir.request_date DESC'
-    
-    inspections = conn.execute(query, params).fetchall()
-    conn.close()
-    
-    headers = ['신청일', '차량번호', '출품번호', '주차번호', '검수신청', '평가답변', '답변일']
+    rows = db.execute(query, params).fetchall()
+    headers = ["신청일", "상태", "차량번호", "출품번호", "주차번호", "진단신청", "답변", "답변일"]
     data = []
-    for row in inspections:
-        data.append([
-            format_datetime(row['request_date']),
-            row['vehicle_number'] or '',
-            row['lot_number'] or '',
-            row['parking_number'] or '',
-            row['inspection_contents'] or '',
-            row['response_contents'] or '',
-            format_datetime(row['response_date'])
-        ])
-    
-    filename = f'inspection_history_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
-    export_to_excel(data, headers, filename)
+    for row in rows:
+        details = _fetch_request_details(row["id"])
+        responses = _fetch_response_details(row["id"])
+        data.append(
+            [
+                row["request_date"],
+                row["status"],
+                row["vehicle_number"],
+                row["lot_number"],
+                row["parking_number"],
+                _summarize_details(details, "content"),
+                _summarize_details(responses, "content"),
+                row["answer_date"] or "",
+            ]
+        )
+    filename = EXPORT_DIR / f"diagnosis_history_{session['username']}.{fmt}"
+    if fmt == "xlsx":
+        export_to_excel(data, headers, filename)
+    else:
+        export_to_pdf(data, headers, filename, title="진단신청내역")
     return send_file(filename, as_attachment=True)
 
-@app.route('/inspection/history/export/pdf')
-@login_required
-def inspection_history_export_pdf():
-    """검수신청내역 PDF 내보내기"""
-    if session.get('user_type') != '검수신청':
-        return redirect(url_for('dashboard'))
-    
-    start_date = request.args.get('start_date', '')
-    end_date = request.args.get('end_date', '')
-    
-    conn = get_db_connection()
-    query = '''
-        SELECT ir.request_date, ir.vehicle_number, ir.lot_number, ir.parking_number,
-               GROUP_CONCAT(id.content, '/') as inspection_contents,
-               GROUP_CONCAT(erd.content, '/') as response_contents,
-               er.response_date
-        FROM inspection_requests ir
-        LEFT JOIN inspection_details id ON ir.id = id.request_id
-        LEFT JOIN evaluation_responses er ON ir.id = er.request_id
-        LEFT JOIN evaluation_response_details erd ON er.id = erd.response_id
-    '''
-    
-    conditions = ['ir.user_id = ?']
-    params = [session['user_id']]
-    
-    if start_date:
-        conditions.append("DATE(ir.request_date) >= ?")
-        params.append(start_date)
-    if end_date:
-        conditions.append("DATE(ir.request_date) <= ?")
-        params.append(end_date)
-    
-    if conditions:
-        query += ' WHERE ' + ' AND '.join(conditions)
-    query += ' GROUP BY ir.id ORDER BY ir.request_date DESC'
-    
-    inspections = conn.execute(query, params).fetchall()
-    conn.close()
-    
-    headers = ['신청일', '차량번호', '출품번호', '주차번호', '검수신청', '평가답변', '답변일']
-    data = []
-    for row in inspections:
-        data.append([
-            format_datetime(row['request_date']),
-            row['vehicle_number'] or '',
-            row['lot_number'] or '',
-            row['parking_number'] or '',
-            row['inspection_contents'] or '',
-            row['response_contents'] or '',
-            format_datetime(row['response_date'])
-        ])
-    
-    filename = f'inspection_history_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
-    export_to_pdf(data, headers, filename, title="검수신청내역")
-    return send_file(filename, as_attachment=True)
 
-# 평가사 페이지
-@app.route('/evaluator/dashboard')
+# ------------------- 평가사 영역 ------------------- #
+
+
+@app.route("/evaluator/dashboard")
 @login_required
+@role_required("평가사")
 def evaluator_dashboard():
-    """평가사 대시보드"""
-    if session.get('user_type') != '평가사':
-        return redirect(url_for('dashboard'))
-    return render_template('evaluator/dashboard.html')
+    return render_template("evaluator/dashboard.html")
 
-@app.route('/evaluator/status')
+
+@app.route("/evaluator/status")
 @login_required
+@role_required("평가사")
 def evaluator_status():
-    """신청현황 페이지"""
-    if session.get('user_type') != '평가사':
-        return redirect(url_for('dashboard'))
-    
-    start_date = request.args.get('start_date', '')
-    end_date = request.args.get('end_date', '')
-    
-    conn = get_db_connection()
-    query = '''
-        SELECT ir.*, 
-               COALESCE(ea.status, '신청') as status, 
-               ea.id as assignment_id,
-               GROUP_CONCAT(id.content, '/') as inspection_contents
-        FROM inspection_requests ir
-        LEFT JOIN evaluation_assignments ea ON ir.id = ea.request_id
-        LEFT JOIN inspection_details id ON ir.id = id.request_id
-        WHERE 1=1
-    '''
-    
-    params = []
-    if start_date:
-        query += ' AND DATE(ir.request_date) >= ?'
-        params.append(start_date)
-    if end_date:
-        query += ' AND DATE(ir.request_date) <= ?'
-        params.append(end_date)
-    
-    query += ' GROUP BY ir.id ORDER BY ir.request_date DESC'
-    
-    requests = conn.execute(query, params).fetchall()
-    
-    # 평가사 목록
-    evaluators = conn.execute('''
-        SELECT id, name FROM users WHERE user_type = '평가사' AND approved = 1
-    ''').fetchall()
-    
-    conn.close()
-    
-    return render_template('evaluator/status.html', 
-                         requests=requests, 
-                         evaluators=evaluators,
-                         start_date=start_date, 
-                         end_date=end_date)
+    clause, params = _filter_clause("dr.request_date")
+    db = get_db()
+    rows = db.execute(
+        f"""
+        SELECT dr.*, applicant.name AS applicant_name
+        FROM diagnosis_requests dr
+        JOIN users applicant ON applicant.id = dr.applicant_id
+        WHERE 1=1 {clause}
+        ORDER BY dr.request_date DESC
+        """,
+        params,
+    ).fetchall()
 
-@app.route('/evaluator/status/assign', methods=['POST'])
+    evaluators = db.execute(
+        "SELECT * FROM users WHERE user_type = '평가사' AND approved = 1"
+    ).fetchall()
+
+    start_date = request.args.get("start_date", "")
+    end_date = request.args.get("end_date", "")
+    return render_template(
+        "evaluator/status.html",
+        requests=rows,
+        evaluators=evaluators,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+@app.route("/admin/diagnosis/<int:diagnosis_id>/assign-evaluator", methods=["POST"])
 @login_required
-def evaluator_status_assign():
-    """평가사 배정"""
-    data = request.get_json()
-    request_id = data.get('request_id')
-    evaluator_id = data.get('evaluator_id')
-    evaluator_name = data.get('evaluator_name', '')
-    
-    conn = get_db_connection()
+@role_required("관리자")
+def admin_assign_evaluator(diagnosis_id: int):
+    """관리자가 평가사를 배정하는 API"""
     try:
-        # 평가사 ID 결정
-        final_evaluator_id = None
+        data = request.get_json()
+        if not data:
+            return jsonify(success=False, message="요청 데이터가 없습니다."), 400
+        
+        evaluator_id = data.get("evaluator_id")
+        manual_name = data.get("manual_name", "").strip() if data.get("manual_name") else ""
+
+        if not evaluator_id and not manual_name:
+            return jsonify(success=False, message="평가사를 선택하거나 입력해주세요."), 400
+
+        db = get_db()
         if evaluator_id:
-            final_evaluator_id = evaluator_id
-        elif evaluator_name:
-            evaluator_user = conn.execute('''
-                SELECT id FROM users WHERE name = ? AND user_type = '평가사' AND approved = 1
-            ''', (evaluator_name,)).fetchone()
-            if evaluator_user:
-                final_evaluator_id = evaluator_user['id']
-            else:
-                return jsonify({'success': False, 'message': '평가사를 찾을 수 없습니다.'})
+            evaluator = db.execute("SELECT * FROM users WHERE id = ? AND user_type = '평가사'", (evaluator_id,)).fetchone()
+            if not evaluator:
+                return jsonify(success=False, message="평가사를 찾을 수 없습니다."), 404
+            evaluator_name = evaluator["name"] if evaluator["name"] else ""
+            evaluator_email = evaluator["email"] if evaluator["email"] else None
+        elif manual_name:
+            evaluator_name = manual_name
+            evaluator_id = None
+            evaluator_email = None
         else:
-            return jsonify({'success': False, 'message': '평가사를 선택하거나 입력해주세요.'})
-        
-        # 기존 배정 확인
-        existing = conn.execute('''
-            SELECT id FROM evaluation_assignments WHERE request_id = ?
-        ''', (request_id,)).fetchone()
-        
-        if existing:
-            conn.execute('''
-                UPDATE evaluation_assignments SET evaluator_id = ?, status = '평가사배정'
-                WHERE id = ?
-            ''', (final_evaluator_id, existing['id']))
-        else:
-            conn.execute('''
-                INSERT INTO evaluation_assignments (request_id, evaluator_id, status)
-                VALUES (?, ?, '평가사배정')
-            ''', (request_id, final_evaluator_id))
-        
-        conn.commit()
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-    finally:
-        conn.close()
+            return jsonify(success=False, message="평가사를 선택하거나 입력해주세요."), 400
 
-@app.route('/evaluator/status/complete', methods=['POST'])
+        # 진단신청 정보 가져오기
+        diagnosis = _fetch_diagnosis(diagnosis_id)
+        if not diagnosis:
+            return jsonify(success=False, message="진단신청을 찾을 수 없습니다."), 404
+
+        # 평가사 배정
+        db.execute(
+            """
+            UPDATE diagnosis_requests
+            SET evaluator_id = ?, evaluator_name = ?, status = '평가사배정'
+            WHERE id = ?
+            """,
+            (evaluator_id, evaluator_name, diagnosis_id),
+        )
+        db.commit()
+
+        # 평가사에게 알림 이메일 전송 (이메일이 있는 경우)
+        if evaluator_email:
+            try:
+                # sqlite3.Row는 딕셔너리처럼 접근 (None 체크 필요)
+                vehicle_num = diagnosis['vehicle_number'] or '차량번호 없음'
+                lot_num = diagnosis['lot_number'] or ''
+                parking_num = diagnosis['parking_number'] or ''
+                request_date = diagnosis['request_date'] or ''
+                
+                subject = f"진단 신청 배정 알림 - {vehicle_num}"
+                body_html = f"""
+                <html>
+                <body>
+                    <h2>진단 신청 배정 알림</h2>
+                    <p>안녕하세요, {evaluator_name}님</p>
+                    <p>새로운 진단 신청이 배정되었습니다.</p>
+                    <hr>
+                    <p><strong>차량번호:</strong> {vehicle_num}</p>
+                    <p><strong>출품번호:</strong> {lot_num}</p>
+                    <p><strong>주차번호:</strong> {parking_num}</p>
+                    <p><strong>신청일:</strong> {request_date}</p>
+                    <hr>
+                    <p>평가사 페이지에서 답변을 입력해주세요.</p>
+                    <p>위카모빌리티 주식회사</p>
+                </body>
+                </html>
+                """
+                send_email(evaluator_email, subject, body_html)
+            except Exception as e:
+                # 이메일 전송 실패해도 평가사 배정은 성공으로 처리
+                print(f"이메일 전송 실패 (평가사 배정은 성공): {e}")
+
+        return jsonify(success=True, evaluator_name=evaluator_name)
+    except Exception as e:
+        print(f"평가사 배정 오류: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify(success=False, message=f"오류가 발생했습니다: {str(e)}"), 500
+
+
+@app.route("/evaluator/status/assign", methods=["POST"])
 @login_required
-def evaluator_status_complete():
-    """평가 완료 처리"""
+@role_required("평가사")
+def evaluator_assign():
     data = request.get_json()
-    assignment_id = data.get('assignment_id')
-    
-    conn = get_db_connection()
-    try:
-        conn.execute('''
-            UPDATE evaluation_assignments SET status = '평가완료' WHERE id = ?
-        ''', (assignment_id,))
-        conn.commit()
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-    finally:
-        conn.close()
+    diagnosis_id = data.get("diagnosis_id")
+    evaluator_id = data.get("evaluator_id")
+    manual_name = data.get("manual_name", "").strip()
 
-@app.route('/evaluator/status/export/excel')
-@login_required
-def evaluator_status_export_excel():
-    """신청현황 엑셀 내보내기"""
-    if session.get('user_type') != '평가사':
-        return redirect(url_for('dashboard'))
-    
-    start_date = request.args.get('start_date', '')
-    end_date = request.args.get('end_date', '')
-    
-    conn = get_db_connection()
-    query = '''
-        SELECT ir.request_date, ir.vehicle_number, ir.lot_number, ir.parking_number,
-               GROUP_CONCAT(id.content, '/') as inspection_contents,
-               COALESCE(ea.status, '신청') as status,
-               ev.name as evaluator_name
-        FROM inspection_requests ir
-        LEFT JOIN evaluation_assignments ea ON ir.id = ea.request_id
-        LEFT JOIN users ev ON ea.evaluator_id = ev.id
-        LEFT JOIN inspection_details id ON ir.id = id.request_id
-        WHERE 1=1
-    '''
-    
-    params = []
-    if start_date:
-        query += ' AND DATE(ir.request_date) >= ?'
-        params.append(start_date)
-    if end_date:
-        query += ' AND DATE(ir.request_date) <= ?'
-        params.append(end_date)
-    
-    query += ' GROUP BY ir.id ORDER BY ir.request_date DESC'
-    
-    requests = conn.execute(query, params).fetchall()
-    conn.close()
-    
-    headers = ['구분', '신청일', '차량번호', '출품번호', '주차번호', '검수신청', '평가사입력']
-    data = []
-    for row in requests:
-        data.append([
-            row['status'],
-            format_datetime(row['request_date']),
-            row['vehicle_number'] or '',
-            row['lot_number'] or '',
-            row['parking_number'] or '',
-            row['inspection_contents'] or '',
-            row['evaluator_name'] or ''
-        ])
-    
-    filename = f'evaluator_status_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
-    export_to_excel(data, headers, filename)
-    return send_file(filename, as_attachment=True)
+    if not diagnosis_id:
+        return jsonify(success=False, message="잘못된 요청입니다.")
 
-@app.route('/evaluator/status/export/pdf')
-@login_required
-def evaluator_status_export_pdf():
-    """신청현황 PDF 내보내기"""
-    if session.get('user_type') != '평가사':
-        return redirect(url_for('dashboard'))
-    
-    start_date = request.args.get('start_date', '')
-    end_date = request.args.get('end_date', '')
-    
-    conn = get_db_connection()
-    query = '''
-        SELECT ir.request_date, ir.vehicle_number, ir.lot_number, ir.parking_number,
-               GROUP_CONCAT(id.content, '/') as inspection_contents,
-               COALESCE(ea.status, '신청') as status,
-               ev.name as evaluator_name
-        FROM inspection_requests ir
-        LEFT JOIN evaluation_assignments ea ON ir.id = ea.request_id
-        LEFT JOIN users ev ON ea.evaluator_id = ev.id
-        LEFT JOIN inspection_details id ON ir.id = id.request_id
-        WHERE 1=1
-    '''
-    
-    params = []
-    if start_date:
-        query += ' AND DATE(ir.request_date) >= ?'
-        params.append(start_date)
-    if end_date:
-        query += ' AND DATE(ir.request_date) <= ?'
-        params.append(end_date)
-    
-    query += ' GROUP BY ir.id ORDER BY ir.request_date DESC'
-    
-    requests = conn.execute(query, params).fetchall()
-    conn.close()
-    
-    headers = ['구분', '신청일', '차량번호', '출품번호', '주차번호', '검수신청', '평가사입력']
-    data = []
-    for row in requests:
-        data.append([
-            row['status'],
-            format_datetime(row['request_date']),
-            row['vehicle_number'] or '',
-            row['lot_number'] or '',
-            row['parking_number'] or '',
-            row['inspection_contents'] or '',
-            row['evaluator_name'] or ''
-        ])
-    
-    filename = f'evaluator_status_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
-    export_to_pdf(data, headers, filename, title="신청현황")
-    return send_file(filename, as_attachment=True)
+    db = get_db()
+    if evaluator_id:
+        evaluator = db.execute("SELECT * FROM users WHERE id = ?", (evaluator_id,)).fetchone()
+        if not evaluator:
+            return jsonify(success=False, message="평가사를 찾을 수 없습니다.")
+        evaluator_name = evaluator["name"]
+    elif manual_name:
+        evaluator_name = manual_name
+        evaluator_id = None
+    else:
+        return jsonify(success=False, message="평가사를 선택하거나 입력해주세요.")
 
-@app.route('/evaluator/response')
+    db.execute(
+        """
+        UPDATE diagnosis_requests
+        SET evaluator_id = ?, evaluator_name = ?, status = '평가사배정'
+        WHERE id = ?
+        """,
+        (evaluator_id, evaluator_name, diagnosis_id),
+    )
+    db.commit()
+
+    return jsonify(success=True)
+
+
+@app.route("/evaluator/status/complete", methods=["POST"])
 @login_required
+@role_required("평가사")
+def evaluator_complete():
+    data = request.get_json()
+    diagnosis_id = data.get("diagnosis_id")
+
+    if not diagnosis_id:
+        return jsonify(success=False, message="잘못된 요청입니다.")
+
+    db = get_db()
+    db.execute(
+        "UPDATE diagnosis_requests SET status = '평가완료' WHERE id = ?",
+        (diagnosis_id,),
+    )
+    db.commit()
+
+    return jsonify(success=True)
+
+
+@app.route("/evaluator/response")
+@login_required
+@role_required("평가사")
 def evaluator_response():
-    """평가답변 페이지"""
-    if session.get('user_type') != '평가사':
-        return redirect(url_for('dashboard'))
-    
-    start_date = request.args.get('start_date', '')
-    end_date = request.args.get('end_date', '')
-    
-    conn = get_db_connection()
-    query = '''
-        SELECT ir.*, ea.id as assignment_id,
-               GROUP_CONCAT(id.content, '/') as inspection_contents,
-               er.id as response_id, er.response_date, er.confirmed
-        FROM inspection_requests ir
-        JOIN evaluation_assignments ea ON ir.id = ea.request_id
-        LEFT JOIN inspection_details id ON ir.id = id.request_id
-        LEFT JOIN evaluation_responses er ON ir.id = er.request_id AND er.evaluator_id = ea.evaluator_id
-        WHERE ea.evaluator_id = ?
-    '''
-    
-    params = [session['user_id']]
-    if start_date:
-        query += ' AND DATE(ir.request_date) >= ?'
-        params.append(start_date)
-    if end_date:
-        query += ' AND DATE(ir.request_date) <= ?'
-        params.append(end_date)
-    
-    query += ' GROUP BY ir.id, ea.id ORDER BY ir.request_date DESC'
-    
-    requests = conn.execute(query, params).fetchall()
-    conn.close()
-    
-    return render_template('evaluator/response.html', 
-                         requests=requests, 
-                         start_date=start_date, 
-                         end_date=end_date)
+    clause, params = _filter_clause("dr.request_date")
+    db = get_db()
+    rows = db.execute(
+        f"""
+        SELECT dr.*, applicant.name AS applicant_name
+        FROM diagnosis_requests dr
+        JOIN users applicant ON applicant.id = dr.applicant_id
+        WHERE (dr.evaluator_id = ? OR dr.evaluator_name = (SELECT name FROM users WHERE id = ?))
+          {clause}
+        ORDER BY dr.request_date DESC
+        """,
+        [session["user_id"], session["user_id"]] + params,
+    ).fetchall()
 
-@app.route('/evaluator/response/<int:request_id>')
-@login_required
-def evaluator_response_form(request_id):
-    """평가답변 입력 폼"""
-    if session.get('user_type') != '평가사':
-        return redirect(url_for('dashboard'))
-    
-    conn = get_db_connection()
-    request_info = conn.execute('''
-        SELECT ir.* FROM inspection_requests ir
-        JOIN evaluation_assignments ea ON ir.id = ea.request_id
-        WHERE ir.id = ? AND ea.evaluator_id = ?
-    ''', (request_id, session['user_id'])).fetchone()
-    
-    if not request_info:
-        conn.close()
-        return redirect(url_for('evaluator_response'))
-    
-    inspection_details = conn.execute('''
-        SELECT * FROM inspection_details WHERE request_id = ? ORDER BY sequence
-    ''', (request_id,)).fetchall()
-    
-    response = conn.execute('''
-        SELECT * FROM evaluation_responses WHERE request_id = ? AND evaluator_id = ?
-    ''', (request_id, session['user_id'])).fetchone()
-    
-    response_details = []
-    if response:
-        response_details = conn.execute('''
-            SELECT * FROM evaluation_response_details WHERE response_id = ? ORDER BY sequence
-        ''', (response['id'],)).fetchall()
-    
-    conn.close()
-    
-    return render_template('evaluator/response_form.html', 
-                         request_info=request_info,
-                         inspection_details=inspection_details,
-                         response=response,
-                         response_details=response_details)
+    enriched = []
+    for row in rows:
+        details = _fetch_request_details(row["id"])
+        responses = _fetch_response_details(row["id"])
+        enriched.append(
+            {
+                "row": row,
+                "request_summary": _summarize_details(details, "content"),
+                "response_summary": _summarize_details(responses, "content"),
+            }
+        )
 
-@app.route('/evaluator/response/save', methods=['POST'])
+    start_date = request.args.get("start_date", "")
+    end_date = request.args.get("end_date", "")
+    return render_template(
+        "evaluator/response.html",
+        requests=enriched,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+@app.route("/evaluator/response/<int:diagnosis_id>")
 @login_required
+@role_required("평가사")
+def evaluator_response_form(diagnosis_id: int):
+    diagnosis = _fetch_diagnosis(diagnosis_id)
+    if not diagnosis:
+        abort(404)
+
+    details = _fetch_request_details(diagnosis_id)
+    if not details:
+        db = get_db()
+        for idx, default_item in enumerate(DEFAULT_REQUEST_ITEMS, 1):
+            db.execute(
+                """
+                INSERT INTO diagnosis_request_items (diagnosis_id, sequence, content)
+                VALUES (?, ?, ?)
+                """,
+                (diagnosis_id, idx, default_item),
+            )
+        db.commit()
+        details = _fetch_request_details(diagnosis_id)
+
+    responses = _fetch_response_details(diagnosis_id)
+    return render_template(
+        "evaluator/response_form.html",
+        diagnosis=diagnosis,
+        request_details=details[:5],
+        response_details=responses,
+    )
+
+
+@app.route("/evaluator/response/<int:diagnosis_id>/json")
+@login_required
+@role_required("평가사")
+def evaluator_response_form_json(diagnosis_id: int):
+    """평가사 답변 입력 폼 데이터를 JSON으로 반환"""
+    diagnosis = _fetch_diagnosis(diagnosis_id)
+    if not diagnosis:
+        return jsonify(success=False, message="진단신청을 찾을 수 없습니다."), 404
+
+    details = _fetch_request_details(diagnosis_id)
+    if not details:
+        db = get_db()
+        for idx, default_item in enumerate(DEFAULT_REQUEST_ITEMS, 1):
+            db.execute(
+                """
+                INSERT INTO diagnosis_request_items (diagnosis_id, sequence, content)
+                VALUES (?, ?, ?)
+                """,
+                (diagnosis_id, idx, default_item),
+            )
+        db.commit()
+        details = _fetch_request_details(diagnosis_id)
+
+    responses = _fetch_response_details(diagnosis_id)
+    response_map = {resp["sequence"]: resp for resp in responses}
+    
+    # 테이블 데이터 구성
+    table_data = []
+    for detail in details[:5]:
+        resp = response_map.get(detail["sequence"])
+        table_data.append({
+            "sequence": detail["sequence"],
+            "request_content": detail["content"],
+            "response_content": resp["content"] if resp else "",
+            "note": resp["note"] if resp else "",
+        })
+    
+    return jsonify(
+        success=True,
+        diagnosis={
+            "id": diagnosis["id"],
+            "request_date": diagnosis["request_date"],
+            "vehicle_number": diagnosis["vehicle_number"] or "",
+            "lot_number": diagnosis["lot_number"] or "",
+            "parking_number": diagnosis["parking_number"] or "",
+            "evaluator_name": diagnosis["evaluator_name"] or "",
+        },
+        table_data=table_data,
+    )
+
+
+@app.route("/evaluator/response/save", methods=["POST"])
+@login_required
+@role_required("평가사")
 def evaluator_response_save():
-    """평가답변 저장"""
     data = request.get_json()
-    request_id = data.get('request_id')
-    details = data.get('details', [])
-    
-    conn = get_db_connection()
-    try:
-        # 기존 답변 확인
-        existing_response = conn.execute('''
-            SELECT id FROM evaluation_responses 
-            WHERE request_id = ? AND evaluator_id = ?
-        ''', (request_id, session['user_id'])).fetchone()
-        
-        if existing_response:
-            response_id = existing_response['id']
-            # 기존 상세내역 삭제
-            conn.execute('DELETE FROM evaluation_response_details WHERE response_id = ?', (response_id,))
-            # 답변일 업데이트
-            conn.execute('''
-                UPDATE evaluation_responses SET response_date = CURRENT_TIMESTAMP
-                WHERE id = ?
-            ''', (response_id,))
-        else:
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO evaluation_responses (request_id, evaluator_id, response_date)
-                VALUES (?, ?, CURRENT_TIMESTAMP)
-            ''', (request_id, session['user_id']))
-            response_id = cursor.lastrowid
-        
-        # 상세내역 저장
-        for detail in details:
-            conn.execute('''
-                INSERT INTO evaluation_response_details (response_id, sequence, content, note)
-                VALUES (?, ?, ?, ?)
-            ''', (response_id, detail['sequence'], detail['content'], detail.get('note', '')))
-        
-        conn.commit()
-        return jsonify({'success': True, 'message': '답변이 저장되었습니다.'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-    finally:
-        conn.close()
+    diagnosis_id = data.get("diagnosis_id")
+    details = data.get("details", [])
 
-@app.route('/evaluator/response/confirm', methods=['POST'])
+    if not diagnosis_id:
+        return jsonify(success=False, message="잘못된 요청입니다.")
+
+    db = get_db()
+    for detail in details:
+        seq = detail.get("sequence")
+        content = detail.get("content", "").strip()
+        note = detail.get("note", "").strip()
+
+        if not content:
+            continue
+
+        db.execute(
+            """
+            INSERT OR REPLACE INTO diagnosis_response_details
+            (diagnosis_id, responder_id, sequence, content, note, updated_at)
+            VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'))
+            """,
+            (diagnosis_id, session["user_id"], seq, content, note),
+        )
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db.execute(
+        "UPDATE diagnosis_requests SET answer_date = ?, status = '답변완료' WHERE id = ?",
+        (now, diagnosis_id),
+    )
+    db.commit()
+
+    return jsonify(success=True, message="저장되었습니다.")
+
+
+@app.route("/evaluator/response/history")
 @login_required
+@role_required("평가사")
+def evaluator_response_history():
+    """답변내역 페이지 - 이미 답변이 입력된 건들만 표시"""
+    clause, params = _filter_clause("dr.request_date")
+    db = get_db()
+    rows = db.execute(
+        f"""
+        SELECT dr.*, applicant.name AS applicant_name
+        FROM diagnosis_requests dr
+        JOIN users applicant ON applicant.id = dr.applicant_id
+        WHERE (dr.evaluator_id = ? OR dr.evaluator_name = (SELECT name FROM users WHERE id = ?))
+          AND dr.answer_date IS NOT NULL
+          {clause}
+        ORDER BY dr.request_date DESC
+        """,
+        [session["user_id"], session["user_id"]] + params,
+    ).fetchall()
+
+    enriched = []
+    for row in rows:
+        details = _fetch_request_details(row["id"])
+        responses = _fetch_response_details(row["id"])
+        enriched.append(
+            {
+                "row": row,
+                "request_summary": _summarize_details(details, "content"),
+                "response_summary": _summarize_details(responses, "content"),
+            }
+        )
+
+    start_date = request.args.get("start_date", "")
+    end_date = request.args.get("end_date", "")
+    return render_template(
+        "evaluator/response_history.html",
+        requests=enriched,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+@app.route("/evaluator/response/confirm", methods=["POST"])
+@login_required
+@role_required("평가사")
 def evaluator_response_confirm():
-    """평가답변 확정"""
     data = request.get_json()
-    request_id = data.get('request_id')
-    
-    conn = get_db_connection()
-    try:
-        conn.execute('''
-            UPDATE evaluation_responses SET confirmed = 1
-            WHERE request_id = ? AND evaluator_id = ?
-        ''', (request_id, session['user_id']))
-        conn.commit()
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-    finally:
-        conn.close()
+    diagnosis_id = data.get("diagnosis_id")
 
-@app.route('/evaluator/response/export/excel')
+    if not diagnosis_id:
+        return jsonify(success=False, message="잘못된 요청입니다.")
+
+    db = get_db()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db.execute(
+        "UPDATE diagnosis_requests SET status = '답변완료', answer_date = ? WHERE id = ?",
+        (now, diagnosis_id),
+    )
+    db.commit()
+
+    return jsonify(success=True)
+
+
+@app.route("/evaluator/response/export/<string:fmt>")
 @login_required
-def evaluator_response_export_excel():
-    """평가답변 엑셀 내보내기"""
-    if session.get('user_type') != '평가사':
-        return redirect(url_for('dashboard'))
-    
-    start_date = request.args.get('start_date', '')
-    end_date = request.args.get('end_date', '')
-    
-    conn = get_db_connection()
-    query = '''
-        SELECT ir.request_date, ir.vehicle_number, ir.lot_number, ir.parking_number,
-               GROUP_CONCAT(id.content, '/') as inspection_contents,
-               GROUP_CONCAT(erd.content, '/') as response_contents,
-               er.response_date, er.confirmed
-        FROM inspection_requests ir
-        JOIN evaluation_assignments ea ON ir.id = ea.request_id
-        LEFT JOIN inspection_details id ON ir.id = id.request_id
-        LEFT JOIN evaluation_responses er ON ir.id = er.request_id AND er.evaluator_id = ea.evaluator_id
-        LEFT JOIN evaluation_response_details erd ON er.id = erd.response_id
-        WHERE ea.evaluator_id = ?
-    '''
-    
-    params = [session['user_id']]
-    if start_date:
-        query += ' AND DATE(ir.request_date) >= ?'
-        params.append(start_date)
-    if end_date:
-        query += ' AND DATE(ir.request_date) <= ?'
-        params.append(end_date)
-    
-    query += ' GROUP BY ir.id ORDER BY ir.request_date DESC'
-    
-    requests = conn.execute(query, params).fetchall()
-    conn.close()
-    
-    headers = ['신청일', '차량번호', '출품번호', '주차번호', '검수신청내역', '평가답변', '답변일', '확정여부']
-    data = []
-    for row in requests:
-        data.append([
-            format_datetime(row['request_date']),
-            row['vehicle_number'] or '',
-            row['lot_number'] or '',
-            row['parking_number'] or '',
-            row['inspection_contents'] or '',
-            row['response_contents'] or '',
-            format_datetime(row['response_date']),
-            '확정' if row['confirmed'] else '미확정'
-        ])
-    
-    filename = f'evaluator_response_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
-    export_to_excel(data, headers, filename)
+@role_required("평가사")
+def evaluator_response_export(fmt: str):
+    if fmt not in ("xlsx", "pdf"):
+        abort(404)
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    if not start_date or not end_date:
+        return redirect(url_for("evaluator_response"))
+
+    clause, params = _filter_clause("dr.request_date")
+    db = get_db()
+    rows = db.execute(
+        f"""
+        SELECT dr.*, applicant.name AS applicant_name
+        FROM diagnosis_requests dr
+        JOIN users applicant ON applicant.id = dr.applicant_id
+        WHERE (dr.evaluator_id = ? OR dr.evaluator_name = (SELECT name FROM users WHERE id = ?))
+          {clause}
+        ORDER BY dr.request_date DESC
+        """,
+        [session["user_id"], session["user_id"]] + params,
+    ).fetchall()
+
+    headers = [
+        "신청일",
+        "차량번호",
+        "출품번호",
+        "주차번호",
+        "진단신청내역",
+        "답변내역",
+        "답변일",
+    ]
+    data: List[List[Any]] = []
+    for row in rows:
+        request_details = _fetch_request_details(row["id"])
+        response_details = _fetch_response_details(row["id"])
+        data.append(
+            [
+                row["request_date"],
+                row["vehicle_number"],
+                row["lot_number"],
+                row["parking_number"],
+                _summarize_details(request_details, "content"),
+                _summarize_details(response_details, "content"),
+                row["answer_date"] or "",
+            ]
+        )
+
+    filename = EXPORT_DIR / f"evaluator_response_{start_date}_{end_date}.{fmt}"
+    if fmt == "xlsx":
+        export_to_excel(data, headers, filename)
+    else:
+        export_to_pdf(data, headers, filename, title="평가답변")
     return send_file(filename, as_attachment=True)
 
-@app.route('/evaluator/response/export/pdf')
-@login_required
-def evaluator_response_export_pdf():
-    """평가답변 PDF 내보내기"""
-    if session.get('user_type') != '평가사':
-        return redirect(url_for('dashboard'))
-    
-    start_date = request.args.get('start_date', '')
-    end_date = request.args.get('end_date', '')
-    
-    conn = get_db_connection()
-    query = '''
-        SELECT ir.request_date, ir.vehicle_number, ir.lot_number, ir.parking_number,
-               GROUP_CONCAT(id.content, '/') as inspection_contents,
-               GROUP_CONCAT(erd.content, '/') as response_contents,
-               er.response_date, er.confirmed
-        FROM inspection_requests ir
-        JOIN evaluation_assignments ea ON ir.id = ea.request_id
-        LEFT JOIN inspection_details id ON ir.id = id.request_id
-        LEFT JOIN evaluation_responses er ON ir.id = er.request_id AND er.evaluator_id = ea.evaluator_id
-        LEFT JOIN evaluation_response_details erd ON er.id = erd.response_id
-        WHERE ea.evaluator_id = ?
-    '''
-    
-    params = [session['user_id']]
-    if start_date:
-        query += ' AND DATE(ir.request_date) >= ?'
-        params.append(start_date)
-    if end_date:
-        query += ' AND DATE(ir.request_date) <= ?'
-        params.append(end_date)
-    
-    query += ' GROUP BY ir.id ORDER BY ir.request_date DESC'
-    
-    requests = conn.execute(query, params).fetchall()
-    conn.close()
-    
-    headers = ['신청일', '차량번호', '출품번호', '주차번호', '검수신청내역', '평가답변', '답변일', '확정여부']
-    data = []
-    for row in requests:
-        data.append([
-            format_datetime(row['request_date']),
-            row['vehicle_number'] or '',
-            row['lot_number'] or '',
-            row['parking_number'] or '',
-            row['inspection_contents'] or '',
-            row['response_contents'] or '',
-            format_datetime(row['response_date']),
-            '확정' if row['confirmed'] else '미확정'
-        ])
-    
-    filename = f'evaluator_response_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
-    export_to_pdf(data, headers, filename, title="평가답변")
-    return send_file(filename, as_attachment=True)
 
-@app.route('/api/translate', methods=['POST'])
-@login_required
-def api_translate():
-    """번역 API"""
-    data = request.get_json()
-    text = data.get('text', '')
-    target = data.get('target', 'ja')
-    
-    try:
-        translated = translate_to_japanese(text)
-        return jsonify({'success': True, 'translated': translated})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-
-@app.route('/dashboard')
-@login_required
-def dashboard():
-    """일반 대시보드 (권한에 따라 리다이렉트)"""
-    user_type = session.get('user_type')
-    if user_type == '관리자':
-        return redirect(url_for('admin_dashboard'))
-    elif user_type == '검수신청':
-        return redirect(url_for('inspection_dashboard'))
-    elif user_type == '평가사':
-        return redirect(url_for('evaluator_dashboard'))
-    return redirect(url_for('login'))
-
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 2000))
-    debug_mode = os.environ.get('FLASK_DEBUG', '0') == '1' or os.environ.get('FLASK_ENV') == 'development'
-    app.debug = debug_mode
-    print(f"Flask 애플리케이션 시작 - 포트: {port}, 디버그 모드: {debug_mode}, DB 경로: {DB_PATH}")
-    app.run(debug=debug_mode, host='0.0.0.0', port=port)
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 3010))
+    debug = os.environ.get("FLASK_DEBUG", "0") == "1"
+    app.run(host="0.0.0.0", port=port, debug=debug)
 
