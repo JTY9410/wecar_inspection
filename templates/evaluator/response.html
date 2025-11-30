@@ -55,17 +55,19 @@
             <tbody>
                 {% for item in requests %}
                 {% set req = item.row %}
-                <tr>
+                <tr id="row-{{ req.id }}">
                     <td>{{ loop.index }}</td>
-                    <td>{{ req.request_date }}</td>
+                    <td><input type="date" class="form-control form-control-sm" name="request_date" value="{{ req.request_date }}" disabled></td>
                     <td>
-                        <span class="badge bg-{% if req.status == '신청' %}secondary{% elif req.status == '답변완료' %}success{% elif req.status == '전송완료' %}info{% else %}warning{% endif %}">
-                            {{ req.status }}
-                        </span>
+                        <select class="form-select form-select-sm" name="status" disabled>
+                            <option value="신청" {% if req.status == '신청' %}selected{% endif %}>신청</option>
+                            <option value="답변완료" {% if req.status == '답변완료' %}selected{% endif %}>답변완료</option>
+                            <option value="전송완료" {% if req.status == '전송완료' %}selected{% endif %}>전송완료</option>
+                        </select>
                     </td>
-                    <td>{{ req.vehicle_number or '' }}</td>
-                    <td>{{ req.lot_number or '' }}</td>
-                    <td>{{ req.parking_number or '' }}</td>
+                    <td><input type="text" class="form-control form-control-sm" name="vehicle_number" value="{{ req.vehicle_number or '' }}" disabled></td>
+                    <td><input type="text" class="form-control form-control-sm" name="lot_number" value="{{ req.lot_number or '' }}" disabled></td>
+                    <td><input type="text" class="form-control form-control-sm" name="parking_number" value="{{ req.parking_number or '' }}" disabled></td>
                     <td class="text-summary">{{ item.request_summary or '' }}</td>
                     <td>
                         <button class="btn btn-sm btn-primary response-btn" data-id="{{ req.id }}">
@@ -351,8 +353,56 @@ $(document).ready(function() {
         });
     });
     
-    // 작업열 수정/저장/삭제 버튼
-    $('.edit-row-btn').on('click', function() {
+    // 작업열 수정 버튼
+    $(document).on('click', '.edit-row-btn', function() {
+        const id = $(this).data('id');
+        const row = $(`#row-${id}`);
+        row.addClass('editing');
+        row.find('input, select').prop('disabled', false);
+        $(this).hide();
+        row.find('.save-row-btn').show();
+    });
+    
+    // 작업열 저장 버튼
+    $(document).on('click', '.save-row-btn', function() {
+        const id = $(this).data('id');
+        const row = $(`#row-${id}`);
+        
+        const data = {
+            id: id,
+            request_date: row.find('[name="request_date"]').val(),
+            status: row.find('[name="status"]').val(),
+            vehicle_number: row.find('[name="vehicle_number"]').val(),
+            lot_number: row.find('[name="lot_number"]').val(),
+            parking_number: row.find('[name="parking_number"]').val()
+        };
+        
+        $.ajax({
+            url: '/evaluator/diagnosis/update',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(data),
+            success: function(response) {
+                if (response.success) {
+                    alert('저장되었습니다.');
+                    // 행 비활성화
+                    row.removeClass('editing');
+                    row.find('input, select').prop('disabled', true);
+                    row.find('.edit-row-btn').show();
+                    row.find('.save-row-btn').hide();
+                } else {
+                    alert(response.message || '저장에 실패했습니다.');
+                }
+            },
+            error: function(xhr) {
+                const response = xhr.responseJSON;
+                alert(response?.message || '저장 중 오류가 발생했습니다.');
+            }
+        });
+    });
+    
+    // 작업열 삭제 버튼
+    $('.delete-row-btn').on('click', function() {
         const id = $(this).data('id');
         const row = $(`tr:has([data-id="${id}"])`);
         // 행 전체를 수정 가능하게 만들기 (필요시 구현)
