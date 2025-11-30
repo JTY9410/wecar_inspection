@@ -22,10 +22,14 @@
         <table class="table table-hover">
             <thead class="table-fixed-header">
                 <tr>
+                    <th>순</th>
                     <th>회원가입구분</th>
+                    <th>가입일자</th>
                     <th>아이디</th>
                     <th>패스워드</th>
                     <th>패스워드확인</th>
+                    <th>이메일</th>
+                    <th>휴대폰</th>
                     <th>회사</th>
                     <th>직책</th>
                     <th>이름</th>
@@ -35,6 +39,7 @@
             <tbody>
                 {% for user in users %}
                 <tr id="row-{{ user.id }}">
+                    <td>{{ loop.index }}</td>
                     <td>
                         <select class="form-select form-select-sm" name="user_type" disabled>
                             <option value="진단신청" {% if user.user_type == '진단신청' %}selected{% endif %}>진단신청</option>
@@ -42,9 +47,12 @@
                             <option value="관리자" {% if user.user_type == '관리자' %}selected{% endif %}>관리자</option>
                         </select>
                     </td>
+                    <td>{{ user.created_at[:10] if user.created_at else '' }}</td>
                     <td><input type="text" class="form-control form-control-sm" name="username" value="{{ user.username }}" disabled></td>
                     <td><input type="password" class="form-control form-control-sm" name="password" value="" placeholder="변경시만 입력" disabled></td>
                     <td><input type="password" class="form-control form-control-sm" name="password_confirm" value="" placeholder="변경시만 입력" disabled></td>
+                    <td><input type="email" class="form-control form-control-sm" name="email" value="{{ user.email or '' }}" disabled></td>
+                    <td><input type="tel" class="form-control form-control-sm" name="phone" value="{{ user.phone or '' }}" disabled></td>
                     <td><input type="text" class="form-control form-control-sm" name="company" value="{{ user.company or '' }}" disabled></td>
                     <td><input type="text" class="form-control form-control-sm" name="position" value="{{ user.position or '' }}" disabled></td>
                     <td><input type="text" class="form-control form-control-sm" name="name" value="{{ user.name }}" disabled></td>
@@ -142,7 +150,7 @@
 <script>
 $(document).ready(function() {
     // 수정 버튼
-    $('.edit-btn').on('click', function() {
+    $(document).on('click', '.edit-btn', function() {
         const id = $(this).data('id');
         const row = $(`#row-${id}`);
         row.addClass('editing');
@@ -152,7 +160,7 @@ $(document).ready(function() {
     });
     
     // 저장 버튼
-    $('.save-btn').on('click', function() {
+    $(document).on('click', '.save-btn', function() {
         const id = $(this).data('id');
         const row = $(`#row-${id}`);
         const password = row.find('[name="password"]').val();
@@ -169,9 +177,11 @@ $(document).ready(function() {
             username: row.find('[name="username"]').val(),
             password: password || null,
             password_confirm: passwordConfirm || null,
+            email: row.find('[name="email"]').val() || null,
+            phone: row.find('[name="phone"]').val() || null,
             name: row.find('[name="name"]').val(),
-            company: row.find('[name="company"]').val(),
-            position: row.find('[name="position"]').val()
+            company: row.find('[name="company"]').val() || null,
+            position: row.find('[name="position"]').val() || null
         };
         
         $.ajax({
@@ -182,8 +192,21 @@ $(document).ready(function() {
             success: function(response) {
                 if (response.success) {
                     alert('저장되었습니다.');
-                    location.reload();
+                    // 행 비활성화
+                    row.removeClass('editing');
+                    row.find('input, select').prop('disabled', true);
+                    row.find('.edit-btn').show();
+                    row.find('.save-btn').hide();
+                    // 패스워드 필드 초기화
+                    row.find('[name="password"]').val('');
+                    row.find('[name="password_confirm"]').val('');
+                } else {
+                    alert(response.message || '저장에 실패했습니다.');
                 }
+            },
+            error: function(xhr) {
+                const response = xhr.responseJSON;
+                alert(response?.message || '저장 중 오류가 발생했습니다.');
             }
         });
     });
