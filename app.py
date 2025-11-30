@@ -344,17 +344,21 @@ def admin_users_update():
     if not user:
         return jsonify(success=False, message="사용자를 찾을 수 없습니다.")
 
-    user_type = data.get("user_type", "").strip()
-    username = data.get("username", "").strip()
-    password = data.get("password", "").strip()
-    password_confirm = data.get("password_confirm", "").strip()
-    email = data.get("email", "").strip()
-    phone = data.get("phone", "").strip()
-    company = data.get("company", "").strip()
-    position = data.get("position", "").strip()
-    name = data.get("name", "").strip()
+    user_type = (data.get("user_type") or "").strip()
+    username = (data.get("username") or "").strip()
+    password = (data.get("password") or "").strip()
+    password_confirm = (data.get("password_confirm") or "").strip()
+    email = (data.get("email") or "").strip() if data.get("email") else None
+    phone = (data.get("phone") or "").strip() if data.get("phone") else None
+    company = (data.get("company") or "").strip() if data.get("company") else None
+    position = (data.get("position") or "").strip() if data.get("position") else None
+    name = (data.get("name") or "").strip()
     approved = data.get("approved", False)
 
+    if not username:
+        return jsonify(success=False, message="아이디를 입력해주세요.")
+    if not name:
+        return jsonify(success=False, message="이름을 입력해주세요.")
     if password and password != password_confirm:
         return jsonify(success=False, message="비밀번호가 일치하지 않습니다.")
 
@@ -392,15 +396,20 @@ def admin_users_update():
         update_fields.append("approved = ?")
         params.append(1 if approved else 0)
 
-    if update_fields:
+    if not update_fields:
+        return jsonify(success=False, message="변경할 내용이 없습니다.")
+
+    try:
         params.append(user_id)
         db.execute(
             f"UPDATE users SET {', '.join(update_fields)} WHERE id = ?",
             params,
         )
         db.commit()
-
-    return jsonify(success=True)
+        return jsonify(success=True)
+    except Exception as e:
+        db.rollback()
+        return jsonify(success=False, message=f"저장 중 오류가 발생했습니다: {str(e)}")
 
 
 @app.route("/admin/users/delete", methods=["POST"])
