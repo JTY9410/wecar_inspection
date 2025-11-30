@@ -13,11 +13,12 @@ services:
       - PORT=3010
       - WECAR_DB_DIR=/app/data
       - FLASK_DEBUG=0
-      # 이메일 전송 설정 (필요시 설정)
-      # - SMTP_SERVER=smtp.gmail.com
-      # - SMTP_PORT=587
-      # - SMTP_USER=your-email@gmail.com
-      # - SMTP_PASSWORD=your-app-password
+      # 이메일 전송 설정 (테스트 모드)
+      - EMAIL_TEST_MODE=true
+      - SMTP_SERVER=smtp.naver.com
+      - SMTP_PORT=587
+      - SMTP_USER=wecarmobility@naver.com
+      - SMTP_PASSWORD=wecar1004
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3010/"]

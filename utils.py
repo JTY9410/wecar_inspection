@@ -139,6 +139,24 @@ def send_email(to_email, subject, body_html, body_text=None):
         smtp_user = os.environ.get('SMTP_USER', '')
         smtp_password = os.environ.get('SMTP_PASSWORD', '')
         
+        # 테스트 모드: 실제 이메일 전송 대신 로그만 출력
+        test_mode = os.environ.get('EMAIL_TEST_MODE', 'true').lower() == 'true'
+        
+        if test_mode:
+            print("=" * 50)
+            print("📧 이메일 전송 (테스트 모드)")
+            print(f"수신자: {to_email}")
+            print(f"제목: {subject}")
+            print(f"발신자: {smtp_user or 'wecarmobility@example.com'}")
+            print("-" * 30)
+            print("내용:")
+            # HTML 태그 제거하여 간단히 표시
+            import re
+            clean_text = re.sub('<[^<]+?>', '', body_html)
+            print(clean_text[:500] + "..." if len(clean_text) > 500 else clean_text)
+            print("=" * 50)
+            return True
+        
         if not smtp_user or not smtp_password:
             error_msg = "이메일 설정이 없습니다. 환경변수 SMTP_USER, SMTP_PASSWORD를 설정해주세요."
             print(error_msg)

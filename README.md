@@ -81,9 +81,44 @@ docker-compose up -d
 - `PORT`: 애플리케이션 포트 (기본값: 3010)
 - `WECAR_DB_DIR`: 데이터베이스 디렉토리 경로
 - `FLASK_DEBUG`: 디버그 모드 (0 또는 1)
-- `SMTP_SERVER`: 이메일 전송 서버
-- `SMTP_USER`: 이메일 계정
-- `SMTP_PASSWORD`: 이메일 비밀번호
+- `SMTP_SERVER`: 이메일 전송 서버 (기본값: smtp.gmail.com)
+- `SMTP_PORT`: 이메일 전송 포트 (기본값: 587)
+- `SMTP_USER`: 이메일 계정 (필수)
+- `SMTP_PASSWORD`: 이메일 비밀번호 또는 앱 비밀번호 (필수)
+
+### 이메일 전송 설정 방법
+
+#### Docker Compose 사용 시
+
+`docker-compose.yml` 파일의 `environment` 섹션에 다음을 추가하세요:
+
+```yaml
+environment:
+  - SMTP_SERVER=smtp.gmail.com
+  - SMTP_PORT=587
+  - SMTP_USER=your-email@gmail.com
+  - SMTP_PASSWORD=your-app-password
+```
+
+설정 후 컨테이너를 재시작하세요:
+```bash
+docker-compose down
+docker-compose up -d
+```
+
+#### Gmail 사용 시
+
+1. Google 계정에서 2단계 인증 활성화
+2. Google 계정 설정 > 보안 > 앱 비밀번호 생성
+3. 생성된 앱 비밀번호를 `SMTP_PASSWORD`에 사용
+
+**주의**: 일반 비밀번호가 아닌 앱 비밀번호를 사용해야 합니다.
+
+#### 다른 이메일 서비스 사용 시
+
+- **Naver**: `SMTP_SERVER=smtp.naver.com`, `SMTP_PORT=587`
+- **Outlook/Hotmail**: `SMTP_SERVER=smtp-mail.outlook.com`, `SMTP_PORT=587`
+- **기타**: 해당 이메일 서비스의 SMTP 설정 확인
 
 ## 디렉토리 구조
 
