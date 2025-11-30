@@ -710,16 +710,23 @@ def admin_diagnosis_send(diagnosis_id: int):
     </html>
     """
 
-    if send_email(applicant["email"], subject, body_html):
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        db.execute(
-            "UPDATE diagnosis_requests SET sent_at = ?, status = '전송완료' WHERE id = ?",
-            (now, diagnosis_id),
-        )
-        db.commit()
-        return jsonify(success=True, sent_at=now)
-    else:
-        return jsonify(success=False, message="이메일 전송에 실패했습니다.")
+    try:
+        if send_email(applicant["email"], subject, body_html):
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            db.execute(
+                "UPDATE diagnosis_requests SET sent_at = ?, status = '전송완료' WHERE id = ?",
+                (now, diagnosis_id),
+            )
+            db.commit()
+            return jsonify(success=True, sent_at=now)
+    except Exception as e:
+        error_message = str(e)
+        # 환경변수 미설정인 경우 더 친절한 메시지 제공
+        if "이메일 설정이 없습니다" in error_message:
+            error_message = "이메일 전송 설정이 되어있지 않습니다. 관리자에게 문의하세요."
+        return jsonify(success=False, message=f"이메일 전송에 실패했습니다: {error_message}")
+    
+    return jsonify(success=False, message="이메일 전송에 실패했습니다.")
 
 
 @app.route("/admin/diagnosis/<int:diagnosis_id>/detail/export/<string:fmt>")

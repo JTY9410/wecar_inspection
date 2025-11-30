@@ -140,8 +140,14 @@ def send_email(to_email, subject, body_html, body_text=None):
         smtp_password = os.environ.get('SMTP_PASSWORD', '')
         
         if not smtp_user or not smtp_password:
-            print("이메일 설정이 없습니다. 환경변수 SMTP_USER, SMTP_PASSWORD를 설정해주세요.")
-            return False
+            error_msg = "이메일 설정이 없습니다. 환경변수 SMTP_USER, SMTP_PASSWORD를 설정해주세요."
+            print(error_msg)
+            raise ValueError(error_msg)
+        
+        if not to_email:
+            error_msg = "수신자 이메일 주소가 없습니다."
+            print(error_msg)
+            raise ValueError(error_msg)
         
         msg = MIMEMultipart('alternative')
         msg['Subject'] = subject
@@ -155,14 +161,24 @@ def send_email(to_email, subject, body_html, body_text=None):
         part2 = MIMEText(body_html, 'html', 'utf-8')
         msg.attach(part2)
         
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
+        with smtplib.SMTP(smtp_server, smtp_port, timeout=30) as server:
             server.starttls()
             server.login(smtp_user, smtp_password)
             server.send_message(msg)
         
+        print(f"이메일 전송 성공: {to_email}")
         return True
+    except smtplib.SMTPAuthenticationError as e:
+        error_msg = f"이메일 인증 실패: {str(e)}"
+        print(error_msg)
+        raise Exception(error_msg)
+    except smtplib.SMTPException as e:
+        error_msg = f"SMTP 오류: {str(e)}"
+        print(error_msg)
+        raise Exception(error_msg)
     except Exception as e:
-        print(f"이메일 전송 오류: {e}")
-        return False
+        error_msg = f"이메일 전송 오류: {str(e)}"
+        print(error_msg)
+        raise Exception(error_msg)
 
 
