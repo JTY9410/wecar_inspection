@@ -743,20 +743,15 @@ def admin_diagnosis_update():
     if not diagnosis:
         return jsonify(success=False, message="진단신청을 찾을 수 없습니다.")
 
-    request_date = data.get("request_date")
     status = data.get("status")
     vehicle_number = data.get("vehicle_number", "").strip()
     lot_number = data.get("lot_number", "").strip()
     parking_number = data.get("parking_number", "").strip()
-    answer_date = data.get("answer_date")
 
     try:
         update_fields = []
         params = []
 
-        if request_date:
-            update_fields.append("request_date = ?")
-            params.append(request_date)
         if status:
             update_fields.append("status = ?")
             params.append(status)
@@ -769,9 +764,19 @@ def admin_diagnosis_update():
         if parking_number is not None:
             update_fields.append("parking_number = ?")
             params.append(parking_number if parking_number else None)
-        if answer_date is not None:
+
+        # 답변이 있는지 확인하여 답변일 자동 업데이트
+        responses = db.execute(
+            "SELECT COUNT(*) as count FROM diagnosis_responses WHERE diagnosis_id = ? AND content IS NOT NULL AND content != ''",
+            (diagnosis_id,)
+        ).fetchone()
+        
+        if responses["count"] > 0:
+            # 답변이 있으면 현재 시간으로 답변일 업데이트
+            from datetime import datetime
+            current_date = datetime.now().strftime("%Y-%m-%d")
             update_fields.append("answer_date = ?")
-            params.append(answer_date if answer_date else None)
+            params.append(current_date)
 
         if update_fields:
             params.append(diagnosis_id)

@@ -62,7 +62,7 @@
                 {% set row = item.row %}
                 <tr id="row-{{ row.id }}">
                     <td>{{ loop.index }}</td>
-                    <td><input type="date" class="form-control form-control-sm" name="request_date" value="{{ row.request_date }}" disabled></td>
+                    <td>{{ row.request_date }}</td>
                     <td>
                         <select class="form-select form-select-sm" name="status" disabled>
                             <option value="신청" {% if row.status == '신청' %}selected{% endif %}>신청</option>
@@ -74,7 +74,7 @@
                     <td><input type="text" class="form-control form-control-sm" name="lot_number" value="{{ row.lot_number or '' }}" disabled></td>
                     <td><input type="text" class="form-control form-control-sm" name="parking_number" value="{{ row.parking_number or '' }}" disabled></td>
                     <td class="text-summary">{{ item.request_summary or '' }}</td>
-                    <td><input type="date" class="form-control form-control-sm" name="answer_date" value="{{ row.answer_date or '' }}" disabled></td>
+                    <td>{{ row.answer_date or '' }}</td>
                     <td class="text-summary">{{ item.response_summary or '' }}</td>
                     <td>
                         {% if row.evaluator_name %}
@@ -346,12 +346,10 @@ $(document).ready(function() {
         
         const data = {
             id: id,
-            request_date: row.find('[name="request_date"]').val(),
             status: row.find('[name="status"]').val(),
             vehicle_number: row.find('[name="vehicle_number"]').val(),
             lot_number: row.find('[name="lot_number"]').val(),
-            parking_number: row.find('[name="parking_number"]').val(),
-            answer_date: row.find('[name="answer_date"]').val() || null
+            parking_number: row.find('[name="parking_number"]').val()
         };
         
         $.ajax({
