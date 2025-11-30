@@ -367,15 +367,21 @@ $(document).ready(function() {
     $(document).on('click', '.save-row-btn', function() {
         const id = $(this).data('id');
         const row = $(`#row-${id}`);
+        const saveBtn = $(this);
+        
+        // 버튼 비활성화
+        saveBtn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm"></span> 저장 중...');
         
         const data = {
             id: id,
             request_date: row.find('[name="request_date"]').val(),
             status: row.find('[name="status"]').val(),
-            vehicle_number: row.find('[name="vehicle_number"]').val(),
-            lot_number: row.find('[name="lot_number"]').val(),
-            parking_number: row.find('[name="parking_number"]').val()
+            vehicle_number: row.find('[name="vehicle_number"]').val() || '',
+            lot_number: row.find('[name="lot_number"]').val() || '',
+            parking_number: row.find('[name="parking_number"]').val() || ''
         };
+        
+        console.log('저장 데이터:', data);
         
         $.ajax({
             url: '/evaluator/diagnosis/update',
@@ -383,6 +389,8 @@ $(document).ready(function() {
             contentType: 'application/json',
             data: JSON.stringify(data),
             success: function(response) {
+                console.log('응답:', response);
+                saveBtn.prop('disabled', false).html('<i class="bi bi-check"></i> 저장');
                 if (response.success) {
                     alert('저장되었습니다.');
                     // 행 비활성화
@@ -394,9 +402,18 @@ $(document).ready(function() {
                     alert(response.message || '저장에 실패했습니다.');
                 }
             },
-            error: function(xhr) {
-                const response = xhr.responseJSON;
-                alert(response?.message || '저장 중 오류가 발생했습니다.');
+            error: function(xhr, status, error) {
+                console.error('오류:', xhr, status, error);
+                saveBtn.prop('disabled', false).html('<i class="bi bi-check"></i> 저장');
+                let errorMessage = '저장 중 오류가 발생했습니다.';
+                if (xhr.responseJSON && xhr.responseJSON.message) {
+                    errorMessage = xhr.responseJSON.message;
+                } else if (xhr.status === 403) {
+                    errorMessage = '권한이 없습니다.';
+                } else if (xhr.status === 404) {
+                    errorMessage = '요청을 찾을 수 없습니다.';
+                }
+                alert(errorMessage);
             }
         });
     });

@@ -831,7 +831,9 @@ def evaluator_diagnosis_update():
         return jsonify(success=False, message="진단신청을 찾을 수 없습니다.")
 
     # 평가사는 자신이 담당하는 진단신청만 수정 가능
-    if diagnosis["evaluator_id"] != session["user_id"]:
+    evaluator_id = diagnosis["evaluator_id"]
+    # evaluator_id가 None이거나 현재 사용자와 다르면 권한 없음
+    if evaluator_id is not None and evaluator_id != session["user_id"]:
         return jsonify(success=False, message="권한이 없습니다.")
 
     request_date = data.get("request_date")
