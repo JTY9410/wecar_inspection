@@ -5,12 +5,15 @@
 {% block content %}
 <div class="container-fluid py-4">
     <div class="page-header">
-        <div class="d-flex justify-content-between align-items-center">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
             <h2><i class="bi bi-people"></i> 회원관리</h2>
-            <div>
+            <div class="d-flex gap-2 flex-wrap">
                 <a href="{{ url_for('admin_dashboard') }}" class="btn btn-outline-secondary">
                     <i class="bi bi-house"></i> 관리자메인페이지로
                 </a>
+                <button type="button" class="btn btn-info" id="filterPendingBtn">
+                    <i class="bi bi-funnel"></i> 승인대기만 보기
+                </button>
                 <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addUserModal">
                     <i class="bi bi-person-plus"></i> 신규추가
                 </button>
@@ -33,12 +36,13 @@
                     <th>회사</th>
                     <th>직책</th>
                     <th>이름</th>
+                    <th>승인상태</th>
                     <th>작업</th>
                 </tr>
             </thead>
             <tbody>
                 {% for user in users %}
-                <tr id="row-{{ user.id }}">
+                <tr id="row-{{ user.id }}" data-approved="{{ 1 if user.approved else 0 }}">
                     <td>{{ loop.index }}</td>
                     <td>
                         <select class="form-select form-select-sm" name="user_type" disabled>
@@ -57,14 +61,34 @@
                     <td><input type="text" class="form-control form-control-sm" name="position" value="{{ user.position or '' }}" disabled></td>
                     <td><input type="text" class="form-control form-control-sm" name="name" value="{{ user.name }}" disabled></td>
                     <td>
-                        <div class="btn-group-sm">
-                            <button class="btn btn-sm btn-outline-primary edit-btn" data-id="{{ user.id }}">
+                        {% if user.approved %}
+                            <span class="badge bg-success">
+                                <i class="bi bi-check-circle"></i> 승인됨
+                            </span>
+                        {% else %}
+                            <span class="badge bg-warning text-dark">
+                                <i class="bi bi-clock-history"></i> 승인대기
+                            </span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="btn-group-sm d-flex flex-wrap gap-1">
+                            {% if not user.approved %}
+                                <button class="btn btn-sm btn-success approve-btn" data-id="{{ user.id }}" title="승인">
+                                    <i class="bi bi-check-circle"></i> 승인
+                                </button>
+                            {% else %}
+                                <button class="btn btn-sm btn-warning reject-btn" data-id="{{ user.id }}" title="승인취소">
+                                    <i class="bi bi-x-circle"></i> 취소
+                                </button>
+                            {% endif %}
+                            <button class="btn btn-sm btn-outline-primary edit-btn" data-id="{{ user.id }}" title="수정">
                                 <i class="bi bi-pencil"></i> 수정
                             </button>
-                            <button class="btn btn-sm btn-success save-btn" data-id="{{ user.id }}" style="display:none;">
+                            <button class="btn btn-sm btn-success save-btn" data-id="{{ user.id }}" style="display:none;" title="저장">
                                 <i class="bi bi-check"></i> 저장
                             </button>
-                            <button class="btn btn-sm btn-danger delete-btn" data-id="{{ user.id }}">
+                            <button class="btn btn-sm btn-danger delete-btn" data-id="{{ user.id }}" title="삭제">
                                 <i class="bi bi-trash"></i> 삭제
                             </button>
                         </div>
@@ -181,7 +205,8 @@ $(document).ready(function() {
             phone: row.find('[name="phone"]').val() || null,
             name: row.find('[name="name"]').val(),
             company: row.find('[name="company"]').val() || null,
-            position: row.find('[name="position"]').val() || null
+            position: row.find('[name="position"]').val() || null,
+            approved: row.data('approved') == 1
         };
         
         $.ajax({
@@ -191,7 +216,11 @@ $(document).ready(function() {
             data: JSON.stringify(data),
             success: function(response) {
                 if (response.success) {
-                    alert('저장되었습니다.');
+                    if (typeof showToast === 'function') {
+                        showToast('저장되었습니다.', 'success');
+                    } else {
+                        alert('저장되었습니다.');
+                    }
                     // 행 비활성화
                     row.removeClass('editing');
                     row.find('input, select').prop('disabled', true);
@@ -201,20 +230,137 @@ $(document).ready(function() {
                     row.find('[name="password"]').val('');
                     row.find('[name="password_confirm"]').val('');
                 } else {
-                    alert(response.message || '저장에 실패했습니다.');
+                    if (typeof showToast === 'function') {
+                        showToast(response.message || '저장에 실패했습니다.', 'error');
+                    } else {
+                        alert(response.message || '저장에 실패했습니다.');
+                    }
                 }
             },
             error: function(xhr) {
                 const response = xhr.responseJSON;
-                alert(response?.message || '저장 중 오류가 발생했습니다.');
+                if (typeof showToast === 'function') {
+                    showToast(response?.message || '저장 중 오류가 발생했습니다.', 'error');
+                } else {
+                    alert(response?.message || '저장 중 오류가 발생했습니다.');
+                }
             }
         });
     });
     
-    // 삭제 버튼
-    $('.delete-btn').on('click', function() {
+    // 승인 버튼
+    $(document).on('click', '.approve-btn', function() {
         const id = $(this).data('id');
-        if (confirm('정말 삭제하시겠습니까?')) {
+        const row = $(`#row-${id}`);
+        const userName = row.find('[name="name"]').val();
+        
+        if (confirm(`${userName}님을 승인하시겠습니까?`)) {
+            $.ajax({
+                url: '{{ url_for("admin_users_update") }}',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    id: id,
+                    approved: true
+                }),
+                success: function(response) {
+                    if (response.success) {
+                        if (typeof showToast === 'function') {
+                            showToast('승인되었습니다.', 'success');
+                        } else {
+                            alert('승인되었습니다.');
+                        }
+                        location.reload();
+                    } else {
+                        if (typeof showToast === 'function') {
+                            showToast(response.message || '승인에 실패했습니다.', 'error');
+                        } else {
+                            alert(response.message || '승인에 실패했습니다.');
+                        }
+                    }
+                },
+                error: function(xhr) {
+                    const response = xhr.responseJSON;
+                    if (typeof showToast === 'function') {
+                        showToast(response?.message || '승인 중 오류가 발생했습니다.', 'error');
+                    } else {
+                        alert(response?.message || '승인 중 오류가 발생했습니다.');
+                    }
+                }
+            });
+        }
+    });
+    
+    // 승인 취소 버튼
+    $(document).on('click', '.reject-btn', function() {
+        const id = $(this).data('id');
+        const row = $(`#row-${id}`);
+        const userName = row.find('[name="name"]').val();
+        
+        if (confirm(`${userName}님의 승인을 취소하시겠습니까?`)) {
+            $.ajax({
+                url: '{{ url_for("admin_users_update") }}',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    id: id,
+                    approved: false
+                }),
+                success: function(response) {
+                    if (response.success) {
+                        if (typeof showToast === 'function') {
+                            showToast('승인이 취소되었습니다.', 'success');
+                        } else {
+                            alert('승인이 취소되었습니다.');
+                        }
+                        location.reload();
+                    } else {
+                        if (typeof showToast === 'function') {
+                            showToast(response.message || '승인 취소에 실패했습니다.', 'error');
+                        } else {
+                            alert(response.message || '승인 취소에 실패했습니다.');
+                        }
+                    }
+                },
+                error: function(xhr) {
+                    const response = xhr.responseJSON;
+                    if (typeof showToast === 'function') {
+                        showToast(response?.message || '승인 취소 중 오류가 발생했습니다.', 'error');
+                    } else {
+                        alert(response?.message || '승인 취소 중 오류가 발생했습니다.');
+                    }
+                }
+            });
+        }
+    });
+    
+    // 승인대기 필터
+    let showPendingOnly = false;
+    $('#filterPendingBtn').on('click', function() {
+        showPendingOnly = !showPendingOnly;
+        if (showPendingOnly) {
+            $(this).html('<i class="bi bi-funnel-fill"></i> 전체보기').removeClass('btn-info').addClass('btn-secondary');
+            $('tbody tr').each(function() {
+                const approved = $(this).data('approved');
+                if (approved == 1) {
+                    $(this).hide();
+                } else {
+                    $(this).show();
+                }
+            });
+        } else {
+            $(this).html('<i class="bi bi-funnel"></i> 승인대기만 보기').removeClass('btn-secondary').addClass('btn-info');
+            $('tbody tr').show();
+        }
+    });
+    
+    // 삭제 버튼
+    $(document).on('click', '.delete-btn', function() {
+        const id = $(this).data('id');
+        const row = $(`#row-${id}`);
+        const userName = row.find('[name="name"]').val();
+        
+        if (confirm(`${userName}님을 정말 삭제하시겠습니까?`)) {
             $.ajax({
                 url: '{{ url_for("admin_users_delete") }}',
                 method: 'POST',
@@ -222,10 +368,26 @@ $(document).ready(function() {
                 data: JSON.stringify({id: id}),
                 success: function(response) {
                     if (response.success) {
-                        alert('삭제되었습니다.');
+                        if (typeof showToast === 'function') {
+                            showToast('삭제되었습니다.', 'success');
+                        } else {
+                            alert('삭제되었습니다.');
+                        }
                         location.reload();
                     } else {
-                        alert(response.message);
+                        if (typeof showToast === 'function') {
+                            showToast(response.message, 'error');
+                        } else {
+                            alert(response.message);
+                        }
+                    }
+                },
+                error: function(xhr) {
+                    const response = xhr.responseJSON;
+                    if (typeof showToast === 'function') {
+                        showToast(response?.message || '삭제 중 오류가 발생했습니다.', 'error');
+                    } else {
+                        alert(response?.message || '삭제 중 오류가 발생했습니다.');
                     }
                 }
             });
@@ -251,10 +413,26 @@ $(document).ready(function() {
             data: JSON.stringify(formData),
             success: function(response) {
                 if (response.success) {
-                    alert('추가되었습니다.');
+                    if (typeof showToast === 'function') {
+                        showToast('추가되었습니다.', 'success');
+                    } else {
+                        alert('추가되었습니다.');
+                    }
                     location.reload();
                 } else {
-                    alert(response.message);
+                    if (typeof showToast === 'function') {
+                        showToast(response.message, 'error');
+                    } else {
+                        alert(response.message);
+                    }
+                }
+            },
+            error: function(xhr) {
+                const response = xhr.responseJSON;
+                if (typeof showToast === 'function') {
+                    showToast(response?.message || '추가 중 오류가 발생했습니다.', 'error');
+                } else {
+                    alert(response?.message || '추가 중 오류가 발생했습니다.');
                 }
             }
         });

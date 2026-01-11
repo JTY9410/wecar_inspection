@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   wecar-diagnosis:
     image: wecarmobility/wecar-diagnosis:latest

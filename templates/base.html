@@ -2,22 +2,134 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="위카 진단">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#366092">
+    <meta name="description" content="위카아라이 차량 진단 시스템">
+    <meta name="keywords" content="차량진단, 위카, inspection">
+    
+    <!-- PWA 지원 -->
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='images/lpgo.png') }}">
+    
     <title>{% block title %}위카아라이 진단시스템{% endblock %}</title>
+    
+    <!-- Bootstrap 5.3 -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    <!-- Google Fonts - Noto Sans KR -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     {% block extra_css %}{% endblock %}
 </head>
 <body>
+    {% if session.user_id %}
+    <!-- 네비게이션 바 -->
+    <nav class="navbar navbar-expand-lg navbar-light">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{{ url_for('index') }}">
+                <i class="bi bi-speedometer2"></i> 위카 진단
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" 
+                    aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    {% if session.user_type == '관리자' %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('admin_dashboard') }}">
+                            <i class="bi bi-speedometer2"></i> 대시보드
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('admin_users') }}">
+                            <i class="bi bi-people"></i> 회원관리
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('admin_diagnosis') }}">
+                            <i class="bi bi-clipboard-check"></i> 진단관리
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('admin_settlements') }}">
+                            <i class="bi bi-calculator"></i> 정산관리
+                        </a>
+                    </li>
+                    {% elif session.user_type == '진단신청' %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('diagnosis_dashboard') }}">
+                            <i class="bi bi-speedometer2"></i> 대시보드
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('diagnosis_request') }}">
+                            <i class="bi bi-plus-circle"></i> 신청하기
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('diagnosis_history') }}">
+                            <i class="bi bi-clock-history"></i> 내역조회
+                        </a>
+                    </li>
+                    {% elif session.user_type == '평가사' %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('evaluator_dashboard') }}">
+                            <i class="bi bi-speedometer2"></i> 대시보드
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('evaluator_status') }}">
+                            <i class="bi bi-list-check"></i> 상태조회
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('evaluator_response') }}">
+                            <i class="bi bi-pencil-square"></i> 답변하기
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('evaluator_response_history') }}">
+                            <i class="bi bi-clock-history"></i> 답변내역
+                        </a>
+                    </li>
+                    {% endif %}
+                    <li class="nav-item">
+                        <a class="nav-link text-danger" href="{{ url_for('logout') }}">
+                            <i class="bi bi-box-arrow-right"></i> 로그아웃
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+    {% endif %}
+    
     {% block content %}{% endblock %}
     
+    <!-- 푸터 -->
+    {% if session.user_id %}
+    <footer class="footer mt-auto">
+        <div class="container-fluid">
+            <p class="mb-0">
+                <small>&copy; 2024 위카모빌리티 주식회사. All rights reserved.</small>
+            </p>
+        </div>
+    </footer>
+    {% endif %}
+    
+    <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="{{ url_for('static', filename='js/common.js') }}"></script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>
-
-
-

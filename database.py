@@ -132,8 +132,13 @@ def _seed_users(cur: sqlite3.Cursor) -> None:
         ("평가사", "wecar2", "2wecar", None, None, "위카모빌리티", "평가사", "평가사1"),
     ]
     for user_type, username, password, email, phone, company, position, name in seeds:
-        cur.execute("SELECT 1 FROM users WHERE username = ?", (username,))
-        if cur.fetchone():
+        cur.execute("SELECT id, approved FROM users WHERE username = ?", (username,))
+        existing = cur.fetchone()
+        if existing:
+            # 기존 계정이 있으면 승인 상태를 확인하고 업데이트
+            user_id, approved = existing
+            if not approved:
+                cur.execute("UPDATE users SET approved = 1 WHERE id = ?", (user_id,))
             continue
         cur.execute(
             """
@@ -193,6 +198,7 @@ __all__ = [
     "save_settlement_payload",
     "fetch_settlement",
 ]
+
 
 
 

@@ -83,7 +83,7 @@
                     <td>{{ row.evaluator_name or '' }}</td>
                     <td>
                         {% if row.translated_at %}
-                        <a href="{{ url_for('admin_diagnosis_translate', diagnosis_id=row.id) }}" class="btn btn-sm btn-outline-info" target="_blank">
+                        <a href="{{ url_for('diagnosis_translate', diagnosis_id=row.id) }}" class="btn btn-sm btn-outline-info" target="_blank">
                             <i class="bi bi-translate"></i> 번역
                         </a>
                         {% else %}

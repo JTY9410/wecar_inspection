@@ -1271,6 +1271,85 @@ def diagnosis_history():
     )
 
 
+@app.route("/diagnosis/<int:diagnosis_id>/translate")
+@login_required
+@role_required("진단신청")
+def diagnosis_translate(diagnosis_id: int):
+    """진단신청자용 번역 페이지"""
+    diagnosis = _fetch_diagnosis(diagnosis_id)
+    if not diagnosis:
+        abort(404)
+    
+    # 자신의 진단 요청인지 확인
+    if diagnosis["applicant_id"] != session["user_id"]:
+        abort(403)
+    
+    details = _fetch_request_details(diagnosis_id)
+    responses = _fetch_response_details(diagnosis_id)
+
+    # 헤더 정보 번역 (sqlite3.Row는 딕셔너리처럼 접근)
+    header_translations = {}
+    vehicle_number = diagnosis['vehicle_number'] if diagnosis['vehicle_number'] else None
+    lot_number = diagnosis['lot_number'] if diagnosis['lot_number'] else None
+    parking_number = diagnosis['parking_number'] if diagnosis['parking_number'] else None
+    evaluator_name = diagnosis['evaluator_name'] if diagnosis['evaluator_name'] else None
+    
+    if vehicle_number:
+        header_translations['vehicle_number'] = translate_to_japanese(f"차량번호: {vehicle_number}")
+    if lot_number:
+        header_translations['lot_number'] = translate_to_japanese(f"출품번호: {lot_number}")
+    if parking_number:
+        header_translations['parking_number'] = translate_to_japanese(f"주차번호: {parking_number}")
+    if evaluator_name:
+        header_translations['evaluator_name'] = translate_to_japanese(f"평가사명: {evaluator_name}")
+
+    # 표 형식으로 번역 데이터 구성
+    translated_table_data = []
+    response_map = {resp['sequence']: resp for resp in responses}
+    
+    for detail in details:
+        resp = response_map.get(detail['sequence'])
+        # 각 항목 번역
+        translated_request = translate_to_japanese(detail['content']) if detail['content'] else ""
+        translated_response = translate_to_japanese(resp['content']) if resp and resp['content'] else ""
+        translated_note = translate_to_japanese(resp['note']) if resp and resp['note'] else ""
+        
+        translated_table_data.append({
+            'sequence': detail['sequence'],
+            'request_content': translated_request,
+            'response_content': translated_response,
+            'note': translated_note,
+        })
+
+    db = get_db()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # 번역된 내용을 저장 (표 형식 유지를 위해 JSON 형태로 저장)
+    translated_data = {
+        'headers': header_translations,
+        'table_data': translated_table_data,
+    }
+    translated_summary = json.dumps(translated_data, ensure_ascii=False)
+    
+    db.execute(
+        """
+        UPDATE diagnosis_requests
+        SET translated_summary = ?, translated_at = ?
+        WHERE id = ?
+        """,
+        (translated_summary, now, diagnosis_id),
+    )
+    db.commit()
+
+    return render_template(
+        "admin/diagnosis_translate.html",
+        diagnosis=diagnosis,
+        translated_headers=header_translations,
+        translated_table_data=translated_table_data,
+        generated_at=now,
+    )
+
+
 @app.route("/diagnosis/history/export/<string:fmt>")
 @login_required
 @role_required("진단신청")
@@ -1782,6 +1861,12 @@ def evaluator_response_export(fmt: str):
     else:
         export_to_pdf(data, headers, filename, title="평가답변")
     return send_file(filename, as_attachment=True)
+
+
+@app.route("/manifest.json")
+def manifest():
+    """PWA manifest.json 제공"""
+    return send_file(BASE_DIR / "static" / "manifest.json", mimetype="application/json")
 
 
 if __name__ == "__main__":

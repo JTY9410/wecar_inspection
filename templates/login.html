@@ -114,11 +114,11 @@
     </div>
 </div>
 
-<!-- 회원가입 승인 미완료 모달 -->
+    <!-- 회원가입 승인 미완료 모달 -->
 <div class="modal fade" id="approvalPendingModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
-            <div class="modal-header bg-warning">
+            <div class="modal-header bg-warning text-dark">
                 <h5 class="modal-title">
                     <i class="bi bi-exclamation-triangle"></i> 회원가입 승인 대기
                 </h5>
@@ -160,13 +160,21 @@ $(document).ready(function() {
                     if (response.message && response.message.includes('회원가입승인이 미완료')) {
                         $('#approvalPendingModal').modal('show');
                     } else {
-                        alert(response.message);
+                        if (typeof showToast === 'function') {
+                            showToast(response.message, 'error');
+                        } else {
+                            alert(response.message);
+                        }
                     }
                 }
             },
             error: function() {
                 submitBtn.prop('disabled', false).html(originalText);
-                alert('로그인 중 오류가 발생했습니다.');
+                if (typeof showToast === 'function') {
+                    showToast('로그인 중 오류가 발생했습니다.', 'error');
+                } else {
+                    alert('로그인 중 오류가 발생했습니다.');
+                }
             }
         });
     });
@@ -217,7 +225,11 @@ $(document).ready(function() {
             data: JSON.stringify(formData),
             success: function(response) {
                 submitBtn.prop('disabled', false).html(originalText);
-                alert(response.message);
+                if (typeof showToast === 'function') {
+                    showToast(response.message, response.success ? 'success' : 'error');
+                } else {
+                    alert(response.message);
+                }
                 if (response.success) {
                     $('#registerModal').modal('hide');
                     $('#registerForm')[0].reset();
@@ -225,7 +237,11 @@ $(document).ready(function() {
             },
             error: function() {
                 submitBtn.prop('disabled', false).html(originalText);
-                alert('회원가입 중 오류가 발생했습니다.');
+                if (typeof showToast === 'function') {
+                    showToast('회원가입 중 오류가 발생했습니다.', 'error');
+                } else {
+                    alert('회원가입 중 오류가 발생했습니다.');
+                }
             }
         });
     });

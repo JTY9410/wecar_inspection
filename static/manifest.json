@@ -1,0 +1,35 @@
+{
+  "name": "위카아라이 진단시스템",
+  "short_name": "위카 진단",
+  "description": "위카아라이 차량 진단 시스템",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#366092",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/static/images/lpgo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/images/lpgo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "productivity"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "진단 신청",
+      "short_name": "신청",
+      "description": "새로운 진단 신청하기",
+      "url": "/diagnosis/request",
+      "icons": [{ "src": "/static/images/lpgo.png", "sizes": "96x96" }]
+    }
+  ]
+}
